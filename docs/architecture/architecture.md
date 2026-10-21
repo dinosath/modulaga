@@ -15,8 +15,8 @@ The monorepo is the development and contract boundary. It does not require every
 application to ship together: each remote still builds and deploys independently.
 
 ```text
-workspace-config/                 checked-in starter and local workspace documents
-services/workspace-config/        copied Rust configuration-service source
+workspace-config/                 checked-in workspace documents
+services/workspace-config/        Rust + Axum configuration service
 apps/shell/                       lightweight host, routing and composition
 apps/admin/                       future independently built admin remote
 apps/demo-react/, apps/demo-vue/  cross-framework integration fixtures
@@ -25,9 +25,10 @@ packages/runtime/                 loader adapters and mount lifecycle contracts
 packages/theme/                   framework-neutral CSS tokens
 ```
 
-For the first milestone, the admin studio lives in `apps/shell` so a menu can be
-edited and previewed without first creating another deployment. It will move to
-`apps/admin` once the view registry and host contract have settled.
+For the first milestone, the admin studio is a static UI app in `apps/admin-panel`
+and is bundled into `apps/shell`. Workspace documents remain in the root
+`workspace-config/` directory; the Rust + Axum server remains in
+`services/workspace-config/`.
 
 ## What to take from OneCX
 
@@ -169,11 +170,11 @@ must still be checked independently.
 
 ### Rust services and ConnectRPC
 
-The sibling `../workspace-config` project is copied to
-`services/workspace-config/`; the starter document is in
-`workspace-config/workspaces/default.json`. The adapted service is Rust + Axum,
-and `connectrpc-build` generates its ConnectRPC handlers and protobuf message
-types from `services/workspace-config/proto/workspace_config.proto`. The shell
+Workspace configuration documents live in
+`workspace-config/workspaces/default.json`. The Rust + Axum service is in
+`services/workspace-config/`. `connectrpc-build` generates its ConnectRPC handlers
+and protobuf message types from
+`services/workspace-config/proto/workspace_config.proto`. The shell
 uses Connect's binary protobuf encoding over browser HTTP. The service stores
 the complete workspace snapshot in PostgreSQL JSONB and enforces optimistic
 revision checks. The previous flat Tonic CRUD API and generated menu tables are

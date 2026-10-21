@@ -41,12 +41,10 @@
       "entries": [
         {
           "id": "operations",
-          "type": "group",
+          "type": "section",
           "label": "Operations",
           "icon": "briefcase",
           "visible": true,
-          "chevron": false,
-          "defaultExpanded": true,
           "children": [
             {
               "id": "orders-link",
@@ -67,12 +65,20 @@
           ]
         },
         {
-          "id": "help-link",
-          "type": "external",
-          "label": "Help center",
-          "href": "https://example.com/help",
-          "icon": "grid",
-          "visible": true
+          "id": "settings",
+          "type": "section",
+          "label": "Settings",
+          "visible": true,
+          "children": [
+            {
+              "id": "help-link",
+              "type": "external",
+              "label": "Help center",
+              "href": "https://example.com/help",
+              "icon": "grid",
+              "visible": true
+            }
+          ]
         }
       ]
     }
@@ -109,19 +115,37 @@
           "id": "active-users-panel",
           "installationId": "orders-installation",
           "componentId": "stat-card",
-          "settings": { "schemaId": "modulaga-stat-card", "value": { "label": "Active users", "value": "2,847" } }
+          "settings": {
+            "schemaId": "modulaga-stat-card",
+            "value": {
+              "label": "Active users",
+              "value": "2,847"
+            }
+          }
         },
         {
           "id": "workspace-count-panel",
           "installationId": "orders-installation",
           "componentId": "stat-card",
-          "settings": { "schemaId": "modulaga-stat-card", "value": { "label": "Workspaces", "value": "12" } }
+          "settings": {
+            "schemaId": "modulaga-stat-card",
+            "value": {
+              "label": "Workspaces",
+              "value": "12"
+            }
+          }
         },
         {
           "id": "remote-count-panel",
           "installationId": "orders-installation",
           "componentId": "stat-card",
-          "settings": { "schemaId": "modulaga-stat-card", "value": { "label": "Microfrontends", "value": "8" } }
+          "settings": {
+            "schemaId": "modulaga-stat-card",
+            "value": {
+              "label": "Microfrontends",
+              "value": "8"
+            }
+          }
         }
       ]
     }

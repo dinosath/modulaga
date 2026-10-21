@@ -1,7 +1,9 @@
 import { For, Show, createSignal } from "solid-js";
+import { ArrowDown, ArrowRight, ArrowUp, ChevronRight, Ellipsis, Eye, EyeOff, GripVertical, Pencil, Plus, Trash2 } from "@lucide/solid";
 import type { JSX } from "@solidjs/web";
-import type { NavigationEntry, NavigationGroup, NavigationLink, WorkspaceNavigation } from "../../shell/src/config/navigation";
-import { defaultNavigation, menuEntries, routePath, saveNavigation } from "../../shell/src/config/navigation";
+import type { NavigationEntry, NavigationGroup, NavigationContainer, NavigationSection, NavigationLink, WorkspaceNavigation } from "../../shell/src/config/navigation";
+import { defaultNavigation, isNavigationContainer, menuEntries, routePath, saveNavigation } from "../../shell/src/config/navigation";
+import { AddMenuItemDialog } from "../../shell/src/components/AddMenuItemDialog";
 import { Badge } from "../../shell/src/components/ui/badge";
 import { Button } from "../../shell/src/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../shell/src/components/ui/card";
@@ -23,9 +25,7 @@ export default function NavigationStudio(props: Props) {
   const [dropTarget, setDropTarget] = createSignal<{ id: string; position: "before" | "after" }>();
   const [openGroupOptions, setOpenGroupOptions] = createSignal<string>();
   const [moveTreeFor, setMoveTreeFor] = createSignal<string>();
-  const [addingEntryTo, setAddingEntryTo] = createSignal<string>();
-  const [newEntryRouteId, setNewEntryRouteId] = createSignal("");
-  const [newEntryLabel, setNewEntryLabel] = createSignal("");
+  const [menuDialog, setMenuDialog] = createSignal<{ kind: "create"; parentId: string } | { kind: "edit"; itemId: string }>();
   const [notice, setNotice] = createSignal("Changes update the workspace menu as you edit.");
 
   const entries = () => menuEntries(props.config());
@@ -37,7 +37,7 @@ export default function NavigationStudio(props: Props) {
   function mapTree(items: NavigationEntry[], id: string, update: (entry: NavigationEntry) => NavigationEntry): NavigationEntry[] {
     return items.map((entry) => {
       if (entry.id === id) return update(entry);
-      return entry.type === "group" ? { ...entry, children: mapTree(entry.children, id, update) } : entry;
+      return isNavigationContainer(entry) ? { ...entry, children: mapTree(entry.children, id, update) } : entry;
     });
   }
 
@@ -45,36 +45,69 @@ export default function NavigationStudio(props: Props) {
     setEntries(mapTree(entries(), id, update));
   }
 
-  function addGroup(parentId?: string) {
-    const name = `Group ${entries().filter((entry) => entry.type === "group").length + 1}`;
-    const group: NavigationGroup = { id: `${slug(name)}-${Date.now()}`, type: "group", label: name, icon: "grid", visible: true, chevron: true, defaultExpanded: true, children: [] };
-    if (parentId) updateEntry(parentId, (entry) => entry.type === "group" ? { ...entry, children: [...entry.children, group] } : entry);
-    else setEntries([...entries(), group]);
+  function addSection() {
+    const name = `Section ${entries().filter((entry) => entry.type === "section").length + 1}`;
+    const section: NavigationSection = { id: `${slug(name)}-${Date.now()}`, type: "section", label: name, visible: true, children: [] };
+    setEntries([...entries(), section]);
   }
 
-  function beginAddEntry(groupId: string) {
+  function beginAddItem(parent: NavigationContainer) {
     setOpenGroupOptions(undefined);
-    setAddingEntryTo(groupId);
-    setNewEntryRouteId(props.config().routes[0]?.id ?? "");
-    setNewEntryLabel("");
+    setMenuDialog({ kind: "create", parentId: parent.id });
   }
 
-  function addConfiguredEntry(groupId: string, event: SubmitEvent) {
-    event.preventDefault();
-    const route = props.config().routes.find((candidate) => candidate.id === newEntryRouteId());
-    const label = newEntryLabel().trim();
-    if (!route || !label) return;
-    const entry: NavigationLink = {
-      id: `${slug(route.id)}-${Date.now()}`,
-      type: "route",
-      routeId: route.id,
-      label,
-      visible: true,
-    };
-    updateEntry(groupId, (group) => group.type === "group" ? { ...group, children: [...group.children, entry] } : group);
-    setAddingEntryTo(undefined);
-    setNewEntryLabel("");
-    setNotice(`${label} added to the menu group.`);
+  function findEntry(id: string, items = entries()): NavigationEntry | undefined {
+    for (const entry of items) {
+      if (entry.id === id) return entry;
+      if (isNavigationContainer(entry)) {
+        const nested = findEntry(id, entry.children);
+        if (nested) return nested;
+      }
+    }
+    return undefined;
+  }
+
+  function findParent(id: string, items = entries()): NavigationContainer | undefined {
+    for (const entry of items) {
+      if (!isNavigationContainer(entry)) continue;
+      if (entry.children.some((child) => child.id === id)) return entry;
+      const nested = findParent(id, entry.children);
+      if (nested) return nested;
+    }
+    return undefined;
+  }
+
+  function saveDialogItem(item: NavigationEntry, parentId?: string) {
+    const current = entries();
+    const existing = findEntry(item.id, current);
+    const withUpdates = existing ? mapTree(current, item.id, () => item) : current;
+    if (existing && findParent(item.id, current)?.id === parentId) {
+      setEntries(withUpdates);
+      setMenuDialog(undefined);
+      setNotice(`${item.label} updated.`);
+      return;
+    }
+    if (!existing) {
+      const insertNew = (items: NavigationEntry[]): NavigationEntry[] => {
+        if (!parentId) return [...items, item];
+        return items.map((entry) => entry.id === parentId && isNavigationContainer(entry)
+          ? { ...entry, children: [...entry.children, item] }
+          : isNavigationContainer(entry) ? { ...entry, children: insertNew(entry.children) } : entry);
+      };
+      setEntries(insertNew(withUpdates));
+    } else {
+      const remove = (items: NavigationEntry[]): NavigationEntry[] => items.filter((entry) => entry.id !== item.id).map((entry) => isNavigationContainer(entry) ? { ...entry, children: remove(entry.children) } : entry);
+      const withoutItem = remove(withUpdates);
+      if (!parentId) setEntries([...withoutItem, item]);
+      else {
+        const insert = (items: NavigationEntry[]): NavigationEntry[] => items.map((entry) => entry.id === parentId && isNavigationContainer(entry)
+          ? { ...entry, children: [...entry.children, item] }
+          : isNavigationContainer(entry) ? { ...entry, children: insert(entry.children) } : entry);
+        setEntries(insert(withoutItem));
+      }
+    }
+    setMenuDialog(undefined);
+    setNotice(`${item.label} ${existing ? "updated" : "added"}.`);
   }
 
   function moveEntryInTree(id: string, direction: -1 | 1) {
@@ -87,14 +120,14 @@ export default function NavigationStudio(props: Props) {
         [next[index], next[destination]] = [next[destination]!, next[index]!];
         return next;
       }
-      return items.map((entry) => entry.type === "group" ? { ...entry, children: reorder(entry.children) } : entry);
+      return items.map((entry) => isNavigationContainer(entry) ? { ...entry, children: reorder(entry.children) } : entry);
     };
     setEntries(reorder(entries()));
   }
 
   function containsEntry(entry: NavigationEntry, id: string): boolean {
     if (entry.id === id) return true;
-    return entry.type === "group" && entry.children.some((child) => containsEntry(child, id));
+    return isNavigationContainer(entry) && entry.children.some((child) => containsEntry(child, id));
   }
 
   function moveEntryTo(sourceId: string, targetGroupId?: string) {
@@ -102,7 +135,7 @@ export default function NavigationStudio(props: Props) {
     const findEntry = (items: NavigationEntry[]): NavigationEntry | undefined => {
       for (const entry of items) {
         if (entry.id === sourceId) return entry;
-        if (entry.type === "group") {
+        if (isNavigationContainer(entry)) {
           const nested = findEntry(entry.children);
           if (nested) return nested;
         }
@@ -110,19 +143,7 @@ export default function NavigationStudio(props: Props) {
       return undefined;
     };
     const source = findEntry(current);
-    if (!source || (targetGroupId && (containsEntry(source, targetGroupId) || source.id === targetGroupId))) return;
-
-    const groupDepth = (items: NavigationEntry[], id: string, depth = 0): number | undefined => {
-      for (const entry of items) {
-        if (entry.id === id) return entry.type === "group" ? depth : undefined;
-        if (entry.type === "group") {
-          const nested = groupDepth(entry.children, id, depth + 1);
-          if (nested !== undefined) return nested;
-        }
-      }
-      return undefined;
-    };
-    if (source.type === "group" && targetGroupId && (groupDepth(current, targetGroupId) ?? 0) > 0) return;
+    if (!source || (!targetGroupId && source.type !== "section") || (targetGroupId && (containsEntry(source, targetGroupId) || source.id === targetGroupId)) || (source.type === "section" && targetGroupId)) return;
 
     const remove = (items: NavigationEntry[]): { entry?: NavigationEntry; entries: NavigationEntry[] } => {
       const index = items.findIndex((entry) => entry.id === sourceId);
@@ -133,7 +154,7 @@ export default function NavigationStudio(props: Props) {
       }
       for (let index = 0; index < items.length; index += 1) {
         const item = items[index]!;
-        if (item.type !== "group") continue;
+        if (!isNavigationContainer(item)) continue;
         const result = remove(item.children);
         if (result.entry) {
           const next = [...items];
@@ -150,8 +171,8 @@ export default function NavigationStudio(props: Props) {
       setEntries([...removed.entries, removed.entry]);
     } else {
       const insert = (items: NavigationEntry[]): NavigationEntry[] => items.map((entry) => {
-        if (entry.id === targetGroupId && entry.type === "group") return { ...entry, children: [...entry.children, removed.entry!] };
-        return entry.type === "group" ? { ...entry, children: insert(entry.children) } : entry;
+        if (entry.id === targetGroupId && isNavigationContainer(entry)) return { ...entry, children: [...entry.children, removed.entry!] };
+        return isNavigationContainer(entry) ? { ...entry, children: insert(entry.children) } : entry;
       });
       setEntries(insert(removed.entries));
     }
@@ -160,31 +181,8 @@ export default function NavigationStudio(props: Props) {
   }
 
   function removeEntry(id: string) {
-    const removeTree = (items: NavigationEntry[]): NavigationEntry[] => items.filter((entry) => entry.id !== id).map((entry) => entry.type === "group" ? { ...entry, children: removeTree(entry.children) } : entry);
+    const removeTree = (items: NavigationEntry[]): NavigationEntry[] => items.filter((entry) => entry.id !== id).map((entry) => isNavigationContainer(entry) ? { ...entry, children: removeTree(entry.children) } : entry);
     setEntries(removeTree(entries()));
-  }
-
-  function moveEntry(id: string, direction: -1 | 1) {
-    const next = [...entries()];
-    const index = next.findIndex((entry) => entry.id === id);
-    const destination = index + direction;
-    if (index < 0 || destination < 0 || destination >= next.length) return;
-    const from = next[index]!;
-    next[index] = next[destination]!;
-    next[destination] = from;
-    setEntries(next);
-  }
-
-  function moveNestedEntry(parentId: string, id: string, direction: -1 | 1) {
-    updateEntry(parentId, (parentEntry) => {
-      if (parentEntry.type !== "group") return parentEntry;
-      const children = [...parentEntry.children];
-      const index = children.findIndex((entry) => entry.id === id);
-      const destination = index + direction;
-      if (index < 0 || destination < 0 || destination >= children.length) return parentEntry;
-      [children[index], children[destination]] = [children[destination]!, children[index]!];
-      return { ...parentEntry, children };
-    });
   }
 
   function reorderEntry(sourceId: string, destinationId: string, position: "before" | "after") {
@@ -196,10 +194,6 @@ export default function NavigationStudio(props: Props) {
     const targetIndex = next.findIndex((entry) => entry.id === destinationId);
     if (moved && targetIndex >= 0) next.splice(targetIndex + (position === "after" ? 1 : 0), 0, moved);
     setEntries(next);
-  }
-
-  function toggleVisible(id: string) {
-    updateEntry(id, (entry) => ({ ...entry, visible: entry.visible === false }));
   }
 
   function updateSidebar(change: Partial<NonNullable<WorkspaceNavigation["shell"]>["sidebar"]>) {
@@ -271,7 +265,7 @@ export default function NavigationStudio(props: Props) {
       setNotice("Add a title before saving the welcome page.");
       return;
     }
-    const validEntry = (entry: NavigationEntry): boolean => entry.type === "group"
+    const validEntry = (entry: NavigationEntry): boolean => isNavigationContainer(entry)
       ? entry.children.every(validEntry)
       : entry.type === "route"
         ? props.config().routes.some((route) => route.id === entry.routeId)
@@ -306,28 +300,13 @@ export default function NavigationStudio(props: Props) {
   const selectClass = "h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
   const fieldClass = "grid gap-2 text-sm font-medium text-foreground";
   const iconButtonClass = "inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40";
-  const iconNames = ["grid", "chart", "bag", "cart", "users", "truck", "box", "briefcase", "search", "bell", "monitor", "settings", "user"];
-
-  function renderAddEntryForm(group: NavigationGroup): JSX.Element {
-    return <Show when={addingEntryTo() === group.id}>
-      <form class="grid gap-3 border-t border-border bg-background p-3 sm:grid-cols-[1fr_1fr_auto_auto] sm:items-end" aria-label={`Add entry to ${group.label}`} onSubmit={(event) => addConfiguredEntry(group.id, event)}>
-        <label class={fieldClass}>Entry label<Input aria-label={`Entry label for ${group.label}`} value={newEntryLabel()} onInput={(event) => setNewEntryLabel(event.currentTarget.value)} placeholder="Menu label" required /></label>
-        <label class={fieldClass}>Application page<select class={selectClass} aria-label={`Application page for ${group.label}`} value={newEntryRouteId()} onChange={(event) => setNewEntryRouteId(event.currentTarget.value)} required>
-          <For each={props.config().routes}>{(route) => <option value={route.id}>{route.path}</option>}</For>
-        </select></label>
-        <Button type="submit" size="sm" disabled={props.config().routes.length === 0}>Add entry</Button>
-        <Button type="button" size="sm" variant="ghost" onClick={() => setAddingEntryTo(undefined)}>Cancel</Button>
-      </form>
-    </Show>;
-  }
-
   function renderMoveTargetTree(items: NavigationEntry[], source: NavigationEntry, depth = 0): JSX.Element {
-    const groups = items.filter((entry): entry is NavigationGroup => entry.type === "group");
+    const groups = items.filter(isNavigationContainer);
     return <ul class={depth === 0 ? "grid gap-1" : "ml-3 grid gap-1 border-l border-border pl-2"}>
-      <For each={groups}>{(target) => <Show when={target.id !== source.id && !containsEntry(source, target.id) && (source.type !== "group" || depth === 0)}>
+      <For each={groups}>{(target) => <Show when={source.type !== "section" && target.id !== source.id && !containsEntry(source, target.id)}>
         <li>
           <button class="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70" type="button" aria-label={`Move ${source.label} to ${target.label}`} onClick={() => moveEntryTo(source.id, target.id)}>
-            <span class="min-w-0 flex-1 truncate">{target.label}</span><span aria-hidden="true">›</span>
+            <span class="min-w-0 flex-1 truncate">{target.label}</span><ChevronRight class="size-4 text-muted-foreground" />
           </button>
           {renderMoveTargetTree(target.children, source, depth + 1)}
         </li>
@@ -335,48 +314,51 @@ export default function NavigationStudio(props: Props) {
     </ul>;
   }
 
-  function renderGroupOptions(group: NavigationGroup, index: number, siblings: NavigationEntry[]): JSX.Element {
+  function renderEntryActions(entry: NavigationEntry, index: number, siblings: NavigationEntry[]): JSX.Element {
+    const kind = entry.type === "section" ? "section" : entry.type === "group" ? "group" : "entry";
     return <div class="relative">
-      <div class="flex items-center gap-1">
-        <Button type="button" variant="outline" size="sm" aria-label={`Add entry to ${group.label}`} onClick={() => beginAddEntry(group.id)}>＋ Add entry</Button>
-        <button class={iconButtonClass} type="button" aria-label={`More options for ${group.label}`} aria-expanded={openGroupOptions() === group.id ? "true" : "false"} title="More options" onClick={() => { setOpenGroupOptions((current) => current === group.id ? undefined : group.id); setMoveTreeFor(undefined); }}>⋯</button>
-      </div>
-      <Show when={openGroupOptions() === group.id}>
-        <div class="absolute right-0 top-full z-20 mt-1 grid w-52 gap-0.5 rounded-md border border-border bg-background p-1 text-foreground shadow-md" aria-label={`${group.label} options`}>
-          <button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70 disabled:opacity-40" type="button" aria-label={`Move ${group.label} up`} disabled={index === 0} onClick={() => { moveEntryInTree(group.id, -1); setOpenGroupOptions(undefined); }}><span class="w-4 text-center text-muted-foreground">↑</span>Move up</button>
-          <button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70 disabled:opacity-40" type="button" aria-label={`Move ${group.label} down`} disabled={index === siblings.length - 1} onClick={() => { moveEntryInTree(group.id, 1); setOpenGroupOptions(undefined); }}><span class="w-4 text-center text-muted-foreground">↓</span>Move down</button>
-          <button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70" type="button" aria-expanded={moveTreeFor() === group.id ? "true" : "false"} onClick={() => setMoveTreeFor((current) => current === group.id ? undefined : group.id)}><span class="w-4 text-center text-muted-foreground">↪</span><span class="flex-1">Move to</span><span aria-hidden="true" class="text-muted-foreground">›</span></button>
-          <Show when={moveTreeFor() === group.id}>
-            <div class="my-1 grid max-h-48 gap-0.5 overflow-y-auto border-y border-border py-1" aria-label={`Move ${group.label} to menu group`}>
-              <button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70" type="button" onClick={() => moveEntryTo(group.id)}>Workspace menu</button>
-              {renderMoveTargetTree(entries(), group)}
+      <button class={iconButtonClass} type="button" aria-label={`More options for ${entry.label}`} aria-expanded={openGroupOptions() === entry.id ? "true" : "false"} title="More options" onClick={() => { setOpenGroupOptions((current) => current === entry.id ? undefined : entry.id); setMoveTreeFor(undefined); }}><Ellipsis class="size-4" /></button>
+      <Show when={openGroupOptions() === entry.id}>
+        <div class="absolute right-0 top-full z-20 mt-1 grid w-52 gap-0.5 rounded-md border border-border bg-background p-1 text-foreground shadow-md" aria-label={`${entry.label} options`}>
+          <button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70 disabled:opacity-40" type="button" aria-label={`Move ${entry.label} up`} disabled={index === 0} onClick={() => { moveEntryInTree(entry.id, -1); setOpenGroupOptions(undefined); }}><ArrowUp class="size-4 text-muted-foreground" />Move up</button>
+          <button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70 disabled:opacity-40" type="button" aria-label={`Move ${entry.label} down`} disabled={index === siblings.length - 1} onClick={() => { moveEntryInTree(entry.id, 1); setOpenGroupOptions(undefined); }}><ArrowDown class="size-4 text-muted-foreground" />Move down</button>
+          <button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70" type="button" aria-expanded={moveTreeFor() === entry.id ? "true" : "false"} onClick={() => setMoveTreeFor((current) => current === entry.id ? undefined : entry.id)}><ArrowRight class="size-4 text-muted-foreground" /><span class="flex-1">Move to</span><ChevronRight class="size-4 text-muted-foreground" /></button>
+          <Show when={moveTreeFor() === entry.id}>
+            <div class="my-1 grid max-h-48 gap-0.5 overflow-y-auto border-y border-border py-1" aria-label={`Move ${entry.label} to menu`}>
+              <Show when={entry.type === "section"}><button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70" type="button" onClick={() => moveEntryTo(entry.id)}>Workspace menu</button></Show>
+              {renderMoveTargetTree(entries(), entry)}
             </div>
           </Show>
           <div class="my-1 border-t border-border" />
-          <button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-destructive hover:bg-accent/70" type="button" onClick={() => { removeEntry(group.id); setOpenGroupOptions(undefined); }}><span class="w-4 text-center">×</span>Delete group</button>
+          <button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-destructive hover:bg-accent/70" type="button" onClick={() => { removeEntry(entry.id); setOpenGroupOptions(undefined); }}><Trash2 class="size-4" />Delete {kind}</button>
         </div>
       </Show>
     </div>;
   }
 
-  function renderNestedEntry(entry: NavigationEntry, parentId: string, index: number, siblings: NavigationEntry[]): JSX.Element {
+  function renderNestedEntry(entry: NavigationEntry, index: number, siblings: NavigationEntry[]): JSX.Element {
+    const container = isNavigationContainer(entry);
+    const kind = entry.type === "section" ? "Section" : entry.type === "group" ? "Group" : entry.type === "route" ? "Page" : entry.type === "external" ? "Link" : "Action";
     return <div class="rounded-md border border-border bg-background p-2">
       <div class="flex flex-wrap items-center gap-2">
-        <Badge variant="outline" class="shrink-0">{entry.type === "group" ? "Group" : entry.type === "route" ? "Page" : entry.type === "external" ? "Link" : "Action"}</Badge>
-        <Input aria-label={`${entry.label} label`} class="h-8 min-w-32 flex-1" value={entry.label} onInput={(event) => updateEntry(entry.id, (current) => ({ ...current, label: event.currentTarget.value }))} />
-        <select class={selectClass + " w-32"} aria-label={`${entry.label} icon`} value={entry.icon ?? "grid"} onChange={(event) => updateEntry(entry.id, (current) => ({ ...current, icon: event.currentTarget.value }))}><For each={iconNames}>{(icon) => <option value={icon}>{icon}</option>}</For></select>
-        <span class="hidden max-w-44 truncate text-xs text-muted-foreground md:block">{entry.type === "group" ? `${entry.children.length} items` : destination(entry)}</span>
-        <Show when={entry.type !== "group"}><button class={iconButtonClass} aria-label={`Move ${entry.label} up`} title={`Move ${entry.label} up`} disabled={index === 0} onClick={() => moveNestedEntry(parentId, entry.id, -1)}>↑</button><button class={iconButtonClass} aria-label={`Move ${entry.label} down`} title={`Move ${entry.label} down`} disabled={index === siblings.length - 1} onClick={() => moveNestedEntry(parentId, entry.id, 1)}>↓</button></Show>
-        <button class={iconButtonClass} aria-label="Toggle visibility" aria-pressed={entry.visible !== false ? "true" : "false"} onClick={() => updateEntry(entry.id, (current) => ({ ...current, visible: current.visible === false }))}>{entry.visible === false ? "○" : "◉"}</button>
-        <Show when={entry.type === "group"}><label class="flex items-center gap-1 text-xs text-muted-foreground"><input aria-label={`${entry.label} show chevron`} type="checkbox" checked={(entry as NavigationGroup).chevron === true} onChange={(event) => updateEntry(entry.id, (current) => current.type === "group" ? { ...current, chevron: event.currentTarget.checked } : current)} />Chevron</label><label class="flex items-center gap-1 text-xs text-muted-foreground"><input aria-label={`${entry.label} expanded by default`} type="checkbox" checked={(entry as NavigationGroup).defaultExpanded !== false} onChange={(event) => updateEntry(entry.id, (current) => current.type === "group" ? { ...current, defaultExpanded: event.currentTarget.checked } : current)} />Expanded</label>{renderGroupOptions(entry as NavigationGroup, index, siblings)}</Show>
-        <Show when={entry.type !== "group"}><button class={`${iconButtonClass} text-destructive`} aria-label={`Remove ${entry.label}`} onClick={() => removeEntry(entry.id)}>×</button></Show>
+        <Badge variant="outline" class="shrink-0">{kind}</Badge>
+        <span class="min-w-32 flex-1 truncate px-2 text-sm font-medium" title={entry.label}>{entry.label}</span>
+        <span class="hidden w-24 truncate text-xs text-muted-foreground sm:block">{entry.icon ?? "grid"}</span>
+        <span class="hidden max-w-44 truncate text-xs text-muted-foreground md:block">{container ? `${entry.children.length} items` : destination(entry)}</span>
+        <button class={iconButtonClass} type="button" aria-label={`Edit ${kind.toLowerCase()} ${entry.label}`} title={`Edit ${entry.label}`} onClick={() => setMenuDialog({ kind: "edit", itemId: entry.id })}><Pencil class="size-4" /></button>
+        <button class={iconButtonClass} aria-label="Toggle visibility" aria-pressed={entry.visible !== false ? "true" : "false"} onClick={() => updateEntry(entry.id, (current) => ({ ...current, visible: current.visible === false }))}>{entry.visible === false ? <EyeOff class="size-4" /> : <Eye class="size-4" />}</button>
+        <Show when={entry.type === "group"}><label class="flex items-center gap-1 text-xs text-muted-foreground"><input aria-label={`${entry.label} show chevron`} type="checkbox" checked={(entry as NavigationGroup).chevron !== false} onChange={(event) => { const checked = event.currentTarget.checked; updateEntry(entry.id, (current) => current.type === "group" ? { ...current, chevron: checked } : current); }} />Chevron</label><label class="flex items-center gap-1 text-xs text-muted-foreground"><input aria-label={`${entry.label} expanded by default`} type="checkbox" checked={(entry as NavigationGroup).defaultExpanded !== false} onChange={(event) => { const checked = event.currentTarget.checked; updateEntry(entry.id, (current) => current.type === "group" ? { ...current, defaultExpanded: checked } : current); }} />Expanded</label></Show>
+        <Show when={container}>
+          <Button variant="outline" size="icon" type="button" aria-label={`Add to ${entry.label}`} title={`Add to ${entry.label}`} onClick={() => beginAddItem(entry as NavigationContainer)}><Plus class="size-4" /></Button>
+        </Show>
+        <Show when={!container}><button class={`${iconButtonClass} text-destructive hover:text-destructive`} type="button" aria-label={`Delete entry ${entry.label}`} title="Delete entry" onClick={() => removeEntry(entry.id)}><Trash2 class="size-4" /></button></Show>
+        {renderEntryActions(entry, index, siblings)}
       </div>
-      <Show when={entry.type === "group"}>
+      <Show when={container}>
         <div class="mt-2 flex flex-col gap-2 border-l border-border pl-3">
-          <For each={(entry as NavigationGroup).children}>{(child, childIndex) => renderNestedEntry(child, entry.id, childIndex(), (entry as NavigationGroup).children)}</For>
-          <Show when={(entry as NavigationGroup).children.length === 0}><p class="py-1 text-xs text-muted-foreground">No items in this group.</p></Show>
+          <For each={(entry as NavigationContainer).children}>{(child, childIndex) => renderNestedEntry(child, childIndex(), (entry as NavigationContainer).children)}</For>
+          <Show when={(entry as NavigationContainer).children.length === 0}><p class="py-1 text-xs text-muted-foreground">No entries in this {kind.toLowerCase()}.</p></Show>
         </div>
-        {renderAddEntryForm(entry as NavigationGroup)}
       </Show>
     </div>;
   }
@@ -403,35 +385,18 @@ export default function NavigationStudio(props: Props) {
           <div id={activeTab() === "menu" ? "admin-menu-panel" : activeTab() === "settings" ? "admin-settings-panel" : "admin-styles-panel"} role="tabpanel" aria-labelledby={activeTab() === "menu" ? "admin-menu-tab" : activeTab() === "settings" ? "admin-settings-tab" : "admin-styles-tab"}>
           <CardHeader class="flex-row items-start justify-between gap-4">
             <div class="space-y-1"><CardTitle>{activeTab() === "menu" ? "Menu structure" : activeTab() === "settings" ? "Workspace settings" : "Menu styles"}</CardTitle><CardDescription>{activeTab() === "menu" ? "Drag items to reorder application pages and menu links." : activeTab() === "settings" ? "Configure the shell layout and welcome page." : "Choose the visual theme used by the workspace shell."}</CardDescription></div>
-            <Show when={activeTab() === "menu"}><Button variant="outline" size="sm" type="button" onClick={() => addGroup()}>Add group</Button></Show>
+            <Show when={activeTab() === "menu"}><Button variant="outline" size="sm" type="button" onClick={addSection}><Plus class="mr-1 size-4" />Add section</Button></Show>
           </CardHeader>
           <CardContent class="space-y-6">
             <Show when={activeTab() === "menu"}>
             <div class="space-y-2">
-              <For each={entries()}>{(entry, index) => <div class={`menu-editor-item rounded-lg border border-border ${draggedEntryId() === entry.id ? "opacity-50" : ""} ${dropTarget()?.id === entry.id ? dropTarget()?.position === "before" ? "border-t-2 border-t-primary" : "border-b-2 border-b-primary" : ""}`} onDragOver={(event) => { event.preventDefault(); const transfer = event.dataTransfer; if (transfer && draggedEntryId() !== entry.id) { transfer.dropEffect = "move"; const bounds = event.currentTarget.getBoundingClientRect(); setDropTarget({ id: entry.id, position: event.clientY >= bounds.top + bounds.height / 2 ? "after" : "before" }); } }} onDrop={(event) => { event.preventDefault(); const transfer = event.dataTransfer; const sourceId = transfer?.getData("text/plain") || draggedEntryId(); const bounds = event.currentTarget.getBoundingClientRect(); const position = event.clientY >= bounds.top + bounds.height / 2 ? "after" : "before"; if (sourceId) reorderEntry(sourceId, entry.id, position); setDraggedEntryId(undefined); setDropTarget(undefined); }}>
-                <div class="flex min-h-16 items-center gap-3 p-3">
-                  <span class="cursor-grab select-none touch-none px-1 text-lg text-muted-foreground active:cursor-grabbing" aria-label="Drag to reorder" title="Drag to reorder" draggable="true" onDragStart={(event) => { setDraggedEntryId(entry.id); setDropTarget(undefined); if (event.dataTransfer) { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", entry.id); } }} onDragEnd={() => { setDraggedEntryId(undefined); setDropTarget(undefined); }}>⠿</span>
-                  <Badge variant="outline" class="shrink-0">{entry.type === "group" ? "Group" : entry.type === "route" ? "Page" : entry.type === "external" ? "Link" : "Action"}</Badge>
-                  <div class="grid min-w-0 flex-1 gap-1">
-                    <Input aria-label={`${entry.type === "group" ? "Group" : "Link"} label`} class="h-8 border-0 px-1 font-medium shadow-none focus-visible:ring-0" value={entry.label}
-                      onInput={(event) => updateEntry(entry.id, (current) => ({ ...current, label: event.currentTarget.value }))} />
-                    <span class="truncate px-1 text-xs text-muted-foreground">{entry.type === "group" ? `${entry.children.length} links` : destination(entry)}</span>
-                  </div>
-                  <select class={selectClass + " w-32"} aria-label={`${entry.label} icon`} value={entry.icon ?? "grid"} onChange={(event) => updateEntry(entry.id, (current) => ({ ...current, icon: event.currentTarget.value }))}><For each={iconNames}>{(icon) => <option value={icon}>{icon}</option>}</For></select>
-                  <div class="flex shrink-0">
-                    <Show when={entry.type !== "group"}><button class={iconButtonClass} aria-label={`Move ${entry.label} up`} title={`Move ${entry.label} up`} disabled={index() === 0} onClick={() => moveEntry(entry.id, -1)}>↑</button><button class={iconButtonClass} aria-label={`Move ${entry.label} down`} title={`Move ${entry.label} down`} disabled={index() === entries().length - 1} onClick={() => moveEntry(entry.id, 1)}>↓</button></Show>
-                    <button class={iconButtonClass} aria-label="Toggle link visibility" title="Toggle visibility" aria-pressed={entry.visible !== false ? "true" : "false"} onClick={() => toggleVisible(entry.id)}>{entry.visible === false ? "○" : "◉"}</button>
-                    <Show when={entry.type === "group"}><label class="flex items-center gap-1 text-xs text-muted-foreground"><input aria-label={`${entry.label} show chevron`} type="checkbox" checked={(entry as NavigationGroup).chevron === true} onChange={(event) => updateEntry(entry.id, (current) => current.type === "group" ? { ...current, chevron: event.currentTarget.checked } : current)} />Chevron</label><label class="flex items-center gap-1 text-xs text-muted-foreground"><input aria-label={`${entry.label} expanded by default`} type="checkbox" checked={(entry as NavigationGroup).defaultExpanded !== false} onChange={(event) => updateEntry(entry.id, (current) => current.type === "group" ? { ...current, defaultExpanded: event.currentTarget.checked } : current)} />Expanded</label><Button variant="outline" size="sm" type="button" aria-label="Add submenu" onClick={() => addGroup(entry.id)}>Add submenu</Button>{renderGroupOptions(entry as NavigationGroup, index(), entries())}</Show>
-                    <Show when={entry.type !== "group"}><button class={`${iconButtonClass} text-destructive`} aria-label={`Remove ${entry.label}`} title="Remove" onClick={() => removeEntry(entry.id)}>×</button></Show>
-                  </div>
+              <For each={entries()}>{(entry, index) => <div class={`menu-editor-item rounded-lg border border-border p-2 ${draggedEntryId() === entry.id ? "opacity-50" : ""} ${dropTarget()?.id === entry.id ? dropTarget()?.position === "before" ? "border-t-2 border-t-primary" : "border-b-2 border-b-primary" : ""}`} onDragOver={(event) => { event.preventDefault(); const transfer = event.dataTransfer; if (transfer && draggedEntryId() !== entry.id) { transfer.dropEffect = "move"; const bounds = event.currentTarget.getBoundingClientRect(); setDropTarget({ id: entry.id, position: event.clientY >= bounds.top + bounds.height / 2 ? "after" : "before" }); } }} onDrop={(event) => { event.preventDefault(); const transfer = event.dataTransfer; const sourceId = transfer?.getData("text/plain") || draggedEntryId(); const bounds = event.currentTarget.getBoundingClientRect(); const position = event.clientY >= bounds.top + bounds.height / 2 ? "after" : "before"; if (sourceId) reorderEntry(sourceId, entry.id, position); setDraggedEntryId(undefined); setDropTarget(undefined); }}>
+                <div class="flex items-start gap-2">
+                  <span class="cursor-grab select-none touch-none px-1 pt-2 text-lg text-muted-foreground active:cursor-grabbing" aria-label="Drag to reorder" title="Drag to reorder" draggable="true" onDragStart={(event) => { setDraggedEntryId(entry.id); setDropTarget(undefined); if (event.dataTransfer) { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", entry.id); } }} onDragEnd={() => { setDraggedEntryId(undefined); setDropTarget(undefined); }}><GripVertical class="size-4" /></span>
+                  <div class="min-w-0 flex-1">{renderNestedEntry(entry, index(), entries())}</div>
                 </div>
-                <Show when={entry.type === "group"}><div class="flex flex-col gap-2 border-t border-border bg-muted/40 p-3 pl-6">
-                  <For each={(entry as NavigationGroup).children}>{(child, childIndex) => renderNestedEntry(child, entry.id, childIndex(), (entry as NavigationGroup).children)}</For>
-                  <Show when={(entry as NavigationGroup).children.length === 0}><p class="text-xs text-muted-foreground">No links in this group.</p></Show>
-                  {renderAddEntryForm(entry as NavigationGroup)}
-                </div></Show>
               </div>}</For>
-              <Show when={entries().length === 0}><p class="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">No menu items yet. Add a group to get started.</p></Show>
+              <Show when={entries().length === 0}><p class="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">No menu sections yet. Add a section to get started.</p></Show>
             </div>
 
             </Show>
@@ -497,6 +462,15 @@ export default function NavigationStudio(props: Props) {
         </Card>
 
       </div>
+
+      <Show when={menuDialog()} keyed>
+        {(dialog) => {
+          const edited = dialog.kind === "edit" ? findEntry(dialog.itemId) : undefined;
+          return <Show when={dialog.kind !== "edit" || edited}>
+            <AddMenuItemDialog entries={entries()} parentId={dialog.kind === "create" ? dialog.parentId : findParent(dialog.itemId)?.id} item={edited} routes={props.config().routes} onCancel={() => setMenuDialog(undefined)} onSave={saveDialogItem} />
+          </Show>;
+        }}
+      </Show>
     </div>
   );
 }

@@ -47,7 +47,15 @@ export interface WorkspaceRoute {
 export interface MenuDefinition {
   id: Identifier;
   name: string;
-  entries: MenuEntry[];
+  entries: MenuSection[];
+}
+export interface MenuSection {
+  id: Identifier;
+  type: "section";
+  label: string;
+  icon?: string;
+  visible?: boolean;
+  children: MenuEntry[];
 }
 export interface MenuGroup {
   id: Identifier;

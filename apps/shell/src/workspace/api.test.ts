@@ -108,6 +108,21 @@ describe("workspace ConnectRPC protobuf transport", () => {
     expect(decodeWorkspaceConfigResponse(bytes).revision).toBe(5);
   });
 
+  it("skips unknown protobuf fields for each supported wire type and rejects truncated fixed-width fields", () => {
+    const configBytes = new Uint8Array([
+      ...stringField(1, "default"),
+      ...stringField(2, JSON.stringify(defaultNavigation)),
+      32, 1,
+      34, 1, 42,
+    ]);
+    expect(decodeWorkspaceConfigResponse(configBytes).revision).toBe(0);
+    expect(decodeCatalogResponse(new Uint8Array([...stringField(1, "{}"), 24, 1, 34, 1, 42])).revision).toBe(0);
+    expect(() => decodeWorkspaceConfigResponse(new Uint8Array([9, 1]))).toThrow("truncated");
+    expect(() => decodeWorkspaceConfigResponse(new Uint8Array([29, 1]))).toThrow("truncated");
+    expect(() => decodeCatalogResponse(new Uint8Array([9, 1]))).toThrow("truncated");
+    expect(() => decodeCatalogResponse(new Uint8Array([29, 1]))).toThrow("truncated");
+  });
+
   it("loads a workspace over Connect with binary protobuf media types", async () => {
     const fetch = vi.fn().mockResolvedValue(new Response(responseBytes(), { headers: { "content-type": "application/proto" } }));
     vi.stubGlobal("fetch", fetch);

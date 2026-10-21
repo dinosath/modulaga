@@ -116,7 +116,7 @@
         "name": { "type": "string", "minLength": 1, "maxLength": 80 },
         "entries": {
           "type": "array",
-          "items": { "$ref": "#/$defs/MenuEntry" }
+          "items": { "$ref": "#/$defs/MenuSection" }
         }
       }
     },
@@ -128,6 +128,27 @@
         { "$ref": "#/$defs/ExternalMenuEntry" },
         { "$ref": "#/$defs/ActionMenuEntry" }
       ]
+    },
+    "RootMenuEntry": {
+      "title": "RootMenuEntry",
+      "oneOf": [{ "$ref": "#/$defs/MenuSection" }]
+    },
+    "MenuSection": {
+      "title": "MenuSection",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "label", "children"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "type": { "const": "section" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "icon": { "type": "string", "maxLength": 80 },
+        "visible": { "type": "boolean" },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/MenuEntry" }
+        }
+      }
     },
     "MenuGroup": {
       "title": "MenuGroup",

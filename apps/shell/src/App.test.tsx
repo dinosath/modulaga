@@ -47,14 +47,41 @@ describe("shell app", () => {
 
     const editButton = document.querySelector('[aria-label="Admin menu settings"]') as HTMLButtonElement;
     expect(editButton).not.toBeNull();
-    expect([...document.querySelectorAll('[aria-label="Workspace menu"] > section h2')].map((heading) => heading.textContent)).toEqual(["Operations"]);
+    expect([...document.querySelectorAll('[aria-label="Workspace menu"] > section h2')].map((heading) => heading.textContent)).toEqual(["Operations", "Settings"]);
     expect(document.querySelector('[aria-label="Workspace menu"] [aria-label="Admin Panel"]')).toBeNull();
-    expect(document.querySelector('[aria-label="User profile"]')?.textContent).toContain("John Doe");
+    expect(document.querySelector('[aria-label="User profile"]')).toBeNull();
     expect(document.querySelector("header [aria-label='Edit workspace']")).toBeNull();
     editButton.click();
     await vi.waitFor(() => expect(document.querySelector("h1")?.textContent).toBe("Admin Menu Settings"));
     expect(window.location.pathname).toBe(defaultNavigation.shell?.sidebar.adminMenuSettingsPath);
-    expect(document.querySelector('[aria-label="User profile"]')?.textContent).toContain("John Doe");
+    expect(document.querySelector('[aria-label="User profile"]')).toBeNull();
+  });
+
+  it("uses the shared Group and Entry create dialog from the sidebar plus button", async () => {
+    getConfig.mockResolvedValue({ config: defaultNavigation, revision: 0 });
+    getCatalog.mockResolvedValue({ catalog: { schemaVersion: 1, apps: [] }, revision: 1 });
+    dispose = render(() => <App />, document.body);
+
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Add entry to Operations"]')).not.toBeNull());
+    (document.querySelector('[aria-label="Add entry to Operations"]') as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("Add menu item"));
+    expect(document.querySelector('[role="dialog"] legend')?.textContent).toBe("Menu item type");
+    expect(document.querySelector('[role="dialog"] [aria-label="Entry"]')).not.toBeNull();
+    expect(document.querySelector('[role="dialog"] [aria-label="Group"]')).not.toBeNull();
+    expect(document.querySelector('[role="dialog"] [role="tree"][aria-label="Choose parent menu"]')).not.toBeNull();
+    expect(document.querySelector('[role="dialog"] [role="treeitem"][aria-selected="true"]')?.textContent).toContain("Operations");
+  });
+
+  it("opens the shared prefilled editor from a sidebar item edit button", async () => {
+    getConfig.mockResolvedValue({ config: defaultNavigation, revision: 0 });
+    getCatalog.mockResolvedValue({ catalog: { schemaVersion: 1, apps: [] }, revision: 1 });
+    dispose = render(() => <App />, document.body);
+
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Edit entry Orders"]')).not.toBeNull());
+    (document.querySelector('[aria-label="Edit entry Orders"]') as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("Edit entry"));
+    expect((document.querySelector('[role="dialog"] [aria-label="Menu item label"]') as HTMLInputElement).value).toBe("Orders");
+    expect(document.querySelector('[role="dialog"] [role="treeitem"] input:checked')?.parentElement?.textContent).toContain("Operations");
   });
 
   it("renders only entries returned by the workspace menu configuration", async () => {
@@ -76,8 +103,8 @@ describe("shell app", () => {
       ...defaultNavigation,
       menus: defaultNavigation.menus.map((menu) => ({
         ...menu,
-        entries: menu.entries.map((entry) => entry.id === "operations" && entry.type === "group"
-          ? { ...entry, chevron: true, defaultExpanded: false }
+        entries: menu.entries.map((entry) => entry.id === "operations" && entry.type === "section"
+          ? { ...entry, children: [{ id: "reports", type: "group" as const, label: "Reports", chevron: true, defaultExpanded: false, children: [{ id: "reports-page", type: "route" as const, label: "Reports page", routeId: "orders-overview" }] }] }
           : entry),
       })),
     };
@@ -85,9 +112,9 @@ describe("shell app", () => {
     getCatalog.mockResolvedValue({ catalog: { schemaVersion: 1, apps: [] }, revision: 1 });
     dispose = render(() => <App />, document.body);
 
-    await vi.waitFor(() => expect(document.querySelector('[aria-label="Operations menu"] button[aria-expanded="false"]')).not.toBeNull());
-    (document.querySelector('[aria-label="Operations menu"] button') as HTMLButtonElement).click();
-    await vi.waitFor(() => expect(document.querySelector('[aria-label="Workspace menu"]')?.textContent).toContain("Orders"));
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Reports"][aria-expanded="false"]')).not.toBeNull());
+    (document.querySelector('[aria-label="Reports"][aria-expanded="false"]') as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Workspace menu"]')?.textContent).toContain("Reports page"));
   });
 
   it("keeps workspace settings available in the top menu layout", async () => {

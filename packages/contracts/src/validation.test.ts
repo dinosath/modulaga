@@ -44,20 +44,18 @@ describe("configuration schemas", () => {
     ).toBe(false);
   });
 
-  it("accepts configurable icons, expandable menu groups, and the shell admin action", () => {
+  it("accepts sections, expandable menu groups, and the shell admin action", () => {
     const workspace = fixture<Record<string, any>>("workspaces/default.json");
     workspace.menus[0].entries.push({
       id: "settings",
-      type: "group",
+      type: "section",
       label: "Settings",
       icon: "settings",
       visible: true,
-      chevron: true,
-      defaultExpanded: false,
-      children: [{ id: "admin-panel", type: "action", label: "Admin Panel", action: "admin-panel", path: "/settings/admin-panel", icon: "settings", visible: true }],
+      children: [{ id: "admin-group", type: "group", label: "Admin", chevron: true, children: [{ id: "admin-panel", type: "action", label: "Admin Panel", action: "admin-panel", path: "/settings/admin-panel", icon: "settings", visible: true }] }],
     });
     expect(validateWorkspace(workspace)).toBe(true);
-    workspace.menus[0].entries.at(-1).children[0].action = "unknown-action";
+    workspace.menus[0].entries.at(-1).children[0].children[0].action = "unknown-action";
     expect(validateWorkspace(workspace)).toBe(false);
   });
 });

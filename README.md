@@ -73,10 +73,8 @@ The first user-facing login setup is documented in the [Ferriskey SSO guide](htt
   Rust + Axum ConnectRPC service that serves and validates microfrontend
   release descriptors from `workspace-config/catalog.json`.
 - `packages/contracts`: canonical JSON Schemas and generated validators/types.
-- `workspace-config/`: workspace snapshots and the microfrontend catalog that
-  both services load. The workspace-config Rust service source was copied from
-  the sibling `../workspace-config` project and adapted to the ConnectRPC
-  document contract.
+- `workspace-config/`: workspace snapshots and the microfrontend catalog
+  loaded as defaults by the Rust workspace and catalog services.
 - `compose.yaml`: `local` build profile and `registry` image profile for the
   shell, React remote, and workspace service, with Ferriskey and PostgreSQL.
 

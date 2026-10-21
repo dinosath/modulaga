@@ -7,6 +7,7 @@
     "./NavigationStudio": "./src/NavigationStudio.tsx"
   },
   "dependencies": {
+    "@lucide/solid": "^1.61.0",
     "@solidjs/web": "2.0.0-rc.11",
     "solid-js": "2.0.0-rc.11"
   }

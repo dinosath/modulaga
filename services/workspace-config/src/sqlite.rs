@@ -135,7 +135,16 @@ mod tests {
     async fn seeds_reads_and_updates_workspace_configuration_with_revision_checks() {
         let seed: Value = serde_json::from_str(include_str!("../../../workspace-config/workspaces/default.json")).unwrap();
         let default_entries = seed["menus"][0]["entries"].as_array().unwrap();
-        assert!(default_entries.iter().all(|entry| entry["id"] != "settings" && entry["id"] != "admin-panel"));
+        fn contains_admin_panel_action(entries: &[Value]) -> bool {
+            entries.iter().any(|entry| {
+                (entry["type"] == "action" && entry["action"] == "admin-panel")
+                    || entry["children"]
+                        .as_array()
+                        .is_some_and(|children| contains_admin_panel_action(children))
+            })
+        }
+        assert!(!contains_admin_panel_action(default_entries));
+        assert!(default_entries.iter().all(|entry| entry["type"] == "section"));
         assert_eq!(seed["shell"]["sidebar"]["adminMenuSettingsPath"], "/settings/admin-panel");
         let store = SqliteWorkspaceStore::connect("sqlite::memory:", "default", seed.clone())
             .await

@@ -17,6 +17,7 @@ import {
   Monitor,
   PanelLeftClose,
   PanelLeftOpen,
+  Pencil,
   Plus,
   Search,
   Settings,
@@ -33,7 +34,8 @@ import { Dynamic, Portal } from "@solidjs/web";
 import { getApplicationCatalog, getWorkspaceConfig, updateWorkspaceConfig, type ApplicationCatalog, type ApplicationRelease, type ApplicationCatalogSnapshot } from "./workspace/api";
 import { authConfigured, finishSignIn, getAccessToken, signOut, startSignIn } from "./workspace/auth";
 import NavigationStudio from "../../admin-panel/src/NavigationStudio";
-import { defaultNavigation, menuEntries, readNavigation, routePath, saveNavigation, type NavigationEntry, type NavigationGroup, type NavigationLink, type WorkspaceNavigation } from "./config/navigation";
+import { AddMenuItemDialog } from "./components/AddMenuItemDialog";
+import { defaultNavigation, isNavigationContainer, menuEntries, readNavigation, routePath, saveNavigation, type NavigationEntry, type NavigationContainer, type NavigationGroup, type NavigationLink, type WorkspaceNavigation } from "./config/navigation";
 import { mountDeclaredRemote } from "./probe/federation";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
@@ -106,9 +108,7 @@ export default function App() {
   const [sidebarOptionsPosition, setSidebarOptionsPosition] = createSignal<{ top: number; left: number }>({ top: 0, left: 0 });
   const [sidebarMoveTreeFor, setSidebarMoveTreeFor] = createSignal<string>();
   const [sidebarAddEntryTo, setSidebarAddEntryTo] = createSignal<string>();
-  const [sidebarNewRouteId, setSidebarNewRouteId] = createSignal("");
-  const [sidebarNewEntryLabel, setSidebarNewEntryLabel] = createSignal("");
-  const [sidebarNewEntryIcon, setSidebarNewEntryIcon] = createSignal("");
+  const [sidebarEditItemId, setSidebarEditItemId] = createSignal<string>();
   let remoteContainer!: HTMLDivElement;
   let disposeRemote: (() => void) | undefined;
   let remoteGeneration = 0;
@@ -257,18 +257,10 @@ export default function App() {
     });
   }
 
-  function updateMenuEntry(id: string, update: (entry: NavigationEntry) => NavigationEntry) {
-    const updateTree = (items: NavigationEntry[]): NavigationEntry[] => items.map((entry) => {
-      if (entry.id === id) return update(entry);
-      return entry.type === "group" ? { ...entry, children: updateTree(entry.children) } : entry;
-    });
-    persistMenuEntries(updateTree(menuEntries(navigation())));
-  }
-
   function findMenuSiblings(id: string, items = menuEntries(navigation())): NavigationEntry[] | undefined {
     if (items.some((entry) => entry.id === id)) return items;
     for (const entry of items) {
-      if (entry.type !== "group") continue;
+      if (!isNavigationContainer(entry)) continue;
       const nested = findMenuSiblings(id, entry.children);
       if (nested) return nested;
     }
@@ -285,14 +277,14 @@ export default function App() {
         [next[index], next[nextIndex]] = [next[nextIndex]!, next[index]!];
         return next;
       }
-      return items.map((entry) => entry.type === "group" ? { ...entry, children: move(entry.children) } : entry);
+      return items.map((entry) => isNavigationContainer(entry) ? { ...entry, children: move(entry.children) } : entry);
     };
     persistMenuEntries(move(menuEntries(navigation())));
     setSidebarOptionsFor(undefined);
   }
 
   function containsMenuEntry(entry: NavigationEntry, id: string): boolean {
-    return entry.id === id || (entry.type === "group" && entry.children.some((child) => containsMenuEntry(child, id)));
+    return entry.id === id || (isNavigationContainer(entry) && entry.children.some((child) => containsMenuEntry(child, id)));
   }
 
   function moveMenuGroupTo(groupId: string, destinationId?: string) {
@@ -300,7 +292,7 @@ export default function App() {
     const find = (items: NavigationEntry[]): NavigationEntry | undefined => {
       for (const entry of items) {
         if (entry.id === groupId) return entry;
-        if (entry.type === "group") {
+        if (isNavigationContainer(entry)) {
           const nested = find(entry.children);
           if (nested) return nested;
         }
@@ -308,7 +300,7 @@ export default function App() {
       return undefined;
     };
     const source = find(current);
-    if (!source || source.type !== "group" || (destinationId && containsMenuEntry(source, destinationId))) return;
+    if (!source || !isNavigationContainer(source) || (!destinationId && source.type !== "section") || (source.type === "section" && destinationId) || (destinationId && containsMenuEntry(source, destinationId))) return;
     const remove = (items: NavigationEntry[]): { entry?: NavigationEntry; entries: NavigationEntry[] } => {
       const index = items.findIndex((entry) => entry.id === groupId);
       if (index >= 0) {
@@ -318,7 +310,7 @@ export default function App() {
       }
       for (let index = 0; index < items.length; index += 1) {
         const item = items[index]!;
-        if (item.type !== "group") continue;
+        if (!isNavigationContainer(item)) continue;
         const result = remove(item.children);
         if (result.entry) {
           const next = [...items];
@@ -329,13 +321,13 @@ export default function App() {
       return { entries: items };
     };
     const removed = remove(current);
-    if (!removed.entry || removed.entry.type !== "group") return;
+    if (!removed.entry || !isNavigationContainer(removed.entry)) return;
     if (!destinationId) {
       persistMenuEntries([...removed.entries, removed.entry]);
     } else {
       const insert = (items: NavigationEntry[]): NavigationEntry[] => items.map((entry) => {
-        if (entry.id === destinationId && entry.type === "group") return { ...entry, children: [...entry.children, removed.entry!] };
-        return entry.type === "group" ? { ...entry, children: insert(entry.children) } : entry;
+        if (entry.id === destinationId && isNavigationContainer(entry)) return { ...entry, children: [...entry.children, removed.entry!] };
+        return isNavigationContainer(entry) ? { ...entry, children: insert(entry.children) } : entry;
       });
       persistMenuEntries(insert(removed.entries));
     }
@@ -344,7 +336,7 @@ export default function App() {
   }
 
   function removeMenuGroup(id: string) {
-    const remove = (items: NavigationEntry[]): NavigationEntry[] => items.filter((entry) => entry.id !== id).map((entry) => entry.type === "group" ? { ...entry, children: remove(entry.children) } : entry);
+    const remove = (items: NavigationEntry[]): NavigationEntry[] => items.filter((entry) => entry.id !== id).map((entry) => isNavigationContainer(entry) ? { ...entry, children: remove(entry.children) } : entry);
     persistMenuEntries(remove(menuEntries(navigation())));
     setSidebarOptionsFor(undefined);
   }
@@ -353,53 +345,94 @@ export default function App() {
     setSidebarOptionsFor(undefined);
     setSidebarMoveTreeFor(undefined);
     setSidebarAddEntryTo(groupId);
-    setSidebarNewRouteId(navigation().routes[0]?.id ?? "");
-    setSidebarNewEntryLabel("");
-    setSidebarNewEntryIcon("");
   }
 
   function closeSidebarAddEntry() {
     setSidebarAddEntryTo(undefined);
-    setSidebarNewEntryLabel("");
-    setSidebarNewEntryIcon("");
+    setSidebarEditItemId(undefined);
   }
 
-  function addSidebarEntry(event: SubmitEvent) {
-    event.preventDefault();
-    const groupId = sidebarAddEntryTo();
-    const route = navigation().routes.find((candidate) => candidate.id === sidebarNewRouteId());
-    const label = sidebarNewEntryLabel().trim();
-    if (!groupId || !route || !label) return;
-    const icon = sidebarNewEntryIcon().trim();
-    const entry: NavigationEntry = { id: `${route.id}-${Date.now()}`, type: "route", routeId: route.id, label, ...(icon ? { icon } : {}), visible: true };
-    updateMenuEntry(groupId, (group) => group.type === "group" ? { ...group, children: [...group.children, entry] } : group);
+  function findMenuEntry(id: string, entries = menuEntries(navigation())): NavigationEntry | undefined {
+    for (const entry of entries) {
+      if (entry.id === id) return entry;
+      if (isNavigationContainer(entry)) {
+        const nested = findMenuEntry(id, entry.children);
+        if (nested) return nested;
+      }
+    }
+    return undefined;
+  }
+
+  function findMenuParentId(id: string, entries = menuEntries(navigation())): string | undefined {
+    for (const entry of entries) {
+      if (!isNavigationContainer(entry)) continue;
+      if (entry.children.some((child) => child.id === id)) return entry.id;
+      const nested = findMenuParentId(id, entry.children);
+      if (nested) return nested;
+    }
+    return undefined;
+  }
+
+  function currentSidebarDialog() {
+    const parent = sidebarAddParent();
+    if (parent) return { kind: "create" as const, parent };
+    const id = sidebarEditItemId();
+    const item = id ? findMenuEntry(id) : undefined;
+    return item ? { kind: "edit" as const, item, parentId: findMenuParentId(item.id) } : undefined;
+  }
+
+  function saveSidebarDialogItem(item: NavigationEntry, parentId?: string) {
+    const current = menuEntries(navigation());
+    const existing = findMenuEntry(item.id, current);
+    const replace = (entries: NavigationEntry[]): NavigationEntry[] => entries.map((entry) => entry.id === item.id ? item : isNavigationContainer(entry) ? { ...entry, children: replace(entry.children) } : entry);
+    const updated = existing ? replace(current) : current;
+    if (existing && findMenuParentId(item.id, current) === parentId) {
+      persistMenuEntries(updated);
+      closeSidebarAddEntry();
+      return;
+    }
+    const remove = (entries: NavigationEntry[]): NavigationEntry[] => entries.filter((entry) => entry.id !== item.id).map((entry) => isNavigationContainer(entry) ? { ...entry, children: remove(entry.children) } : entry);
+    const withoutItem = existing ? remove(updated) : updated;
+    const insert = (entries: NavigationEntry[]): NavigationEntry[] => {
+      if (!parentId) return [...entries, item];
+      return entries.map((entry) => entry.id === parentId && isNavigationContainer(entry)
+        ? { ...entry, children: [...entry.children, item] }
+        : isNavigationContainer(entry) ? { ...entry, children: insert(entry.children) } : entry);
+    };
+    persistMenuEntries(insert(withoutItem));
     closeSidebarAddEntry();
   }
 
-  function configuredMenuGroups(entries = menuEntries(navigation())): NavigationGroup[] {
-    return entries.flatMap((entry) => entry.type === "group" ? [entry, ...configuredMenuGroups(entry.children)] : []);
+  function sidebarAddParent(): NavigationContainer | undefined {
+    const parentId = sidebarAddEntryTo();
+    if (!parentId) return undefined;
+    const find = (items: NavigationEntry[]): NavigationEntry | undefined => {
+      for (const entry of items) {
+        if (entry.id === parentId) return entry;
+        if (isNavigationContainer(entry)) {
+          const found = find(entry.children);
+          if (found) return found;
+        }
+      }
+      return undefined;
+    };
+    const parent = find(menuEntries(navigation()));
+    return parent && isNavigationContainer(parent) ? parent : undefined;
   }
 
-  function configuredIcons() {
-    const collect = (entries: NavigationEntry[]): string[] => entries.flatMap((entry) => [
-      ...(entry.icon ? [entry.icon] : []),
-      ...(entry.type === "group" ? collect(entry.children) : []),
-    ]);
-    return [...new Set(collect(menuEntries(navigation())))];
-  }
-
-  function renderSidebarGroupActions(group: NavigationGroup) {
+  function renderSidebarGroupActions(group: NavigationContainer) {
     const siblings = findMenuSiblings(group.id) ?? [];
     const position = siblings.findIndex((entry) => entry.id === group.id);
     const collectMoveTargets = (items: NavigationEntry[], depth = 0): { id: string; label: string; depth: number }[] => items.flatMap((entry) => {
-      if (entry.type !== "group" || entry.id === group.id || containsMenuEntry(group, entry.id)) return [];
+      if (!isNavigationContainer(entry) || entry.id === group.id || containsMenuEntry(group, entry.id)) return [];
       return [{ id: entry.id, label: entry.label, depth }, ...collectMoveTargets(entry.children, depth + 1)];
     });
-    const targets = collectMoveTargets(menuEntries(navigation()));
+    const targets = group.type === "section" ? [] : collectMoveTargets(menuEntries(navigation()));
     return <Show when={!sidebarCollapsed()}>
       <div class="relative ml-auto flex shrink-0 items-center gap-0.5">
-        <Button type="button" variant="ghost" size="icon" class="size-7 text-muted-foreground" aria-label={`Add entry to ${group.label}`} title={`Add entry to ${group.label}`} onClick={(event) => { event.stopPropagation(); beginSidebarAddEntry(group.id); }}><Icon name="plus" class="size-3.5" /></Button>
-        <Button type="button" variant="ghost" size="icon" class="size-7 text-muted-foreground" aria-label={`More options for ${group.label}`} title={`More options for ${group.label}`} aria-expanded={sidebarOptionsFor() === group.id ? "true" : "false"} onClick={(event) => {
+        <Button type="button" variant="ghost" size="icon" class="size-7 text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-sm" aria-label={`Edit ${group.type} ${group.label}`} title={`Edit ${group.label}`} onClick={(event) => { event.stopPropagation(); setSidebarAddEntryTo(undefined); setSidebarEditItemId(group.id); }}><Pencil class="size-3.5" /></Button>
+        <Button type="button" variant="ghost" size="icon" class="size-7 text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-sm" aria-label={`Add entry to ${group.label}`} title={`Add entry to ${group.label}`} onClick={(event) => { event.stopPropagation(); beginSidebarAddEntry(group.id); }}><Icon name="plus" class="size-3.5" /></Button>
+        <Button type="button" variant="ghost" size="icon" class={`size-7 text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-sm ${sidebarOptionsFor() === group.id ? "bg-background text-foreground shadow-sm" : ""}`} aria-label={`More options for ${group.label}`} title={`More options for ${group.label}`} aria-expanded={sidebarOptionsFor() === group.id ? "true" : "false"} onClick={(event) => {
           event.stopPropagation();
           if (sidebarOptionsFor() === group.id) {
             setSidebarOptionsFor(undefined);
@@ -423,12 +456,12 @@ export default function App() {
             <button class="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70" type="button" role="menuitem" aria-expanded={sidebarMoveTreeFor() === group.id ? "true" : "false"} onClick={() => setSidebarMoveTreeFor((current) => current === group.id ? undefined : group.id)}><Icon name="right" class="size-4 text-muted-foreground" /><span class="flex-1">Move to</span><Icon name="rightChevron" class="size-4 text-muted-foreground" /></button>
             <Show when={sidebarMoveTreeFor() === group.id}>
               <div class="my-1 max-h-48 overflow-y-auto border-y border-border py-1" role="group" aria-label="Move group to menu">
-                <button class="flex min-h-9 w-full items-center rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70" type="button" onClick={() => moveMenuGroupTo(group.id)}>Workspace menu</button>
-                <For each={targets}>{(target) => <button class="flex min-h-9 w-full items-center rounded-md pr-2 text-left text-sm text-foreground hover:bg-accent/70" style={{ "padding-left": `${8 + target.depth * 12}px` }} type="button" onClick={() => moveMenuGroupTo(group.id, target.id)}><span class="mr-2 text-muted-foreground">↳</span>{target.label}</button>}</For>
+                <Show when={group.type === "section"}><button class="flex min-h-9 w-full items-center rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70" type="button" onClick={() => moveMenuGroupTo(group.id)}>Workspace menu</button></Show>
+                <For each={targets}>{(target) => <button class="flex min-h-9 w-full items-center gap-2 rounded-md pr-2 text-left text-sm text-foreground hover:bg-accent/70" style={{ "padding-left": `${8 + target.depth * 12}px` }} type="button" onClick={() => moveMenuGroupTo(group.id, target.id)}><Icon name="rightChevron" class="size-3.5 text-muted-foreground" />{target.label}</button>}</For>
               </div>
             </Show>
             <div class="my-1 border-t border-border" />
-            <button class="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-destructive hover:bg-accent/70" type="button" role="menuitem" onClick={() => removeMenuGroup(group.id)}><Icon name="trash" class="size-4" />Delete group</button>
+            <button class="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-destructive hover:bg-accent/70" type="button" role="menuitem" onClick={() => removeMenuGroup(group.id)}><Icon name="trash" class="size-4" />Delete {group.type}</button>
           </div>
           </Portal>
         </Show>
@@ -438,38 +471,39 @@ export default function App() {
 
   function renderSidebarLink(entry: NavigationLink, depth: number) {
     const icon = <Icon name={entry.icon ?? (entry.type === "action" ? "settings" : "grid")} class="size-4 shrink-0" />;
-    return <a
-      class={`flex w-full min-h-9 items-center gap-2 rounded-md text-sm no-underline transition-colors ${sidebarCollapsed() ? "justify-center px-0" : "px-2"} ${activeMenuEntryId() === entry.id ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-accent/70"}`}
+    const active = () => activeMenuEntryId() === entry.id;
+    return <div class={`group/entry flex min-w-0 items-center gap-0.5 rounded-md transition-colors ${active() ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-accent/70"}`}>
+    <a
+      class={`flex min-w-0 min-h-9 flex-1 items-center gap-2 rounded-md text-sm no-underline transition-colors ${sidebarCollapsed() ? "justify-center px-0" : "px-2"} ${active() ? "text-accent-foreground" : "text-foreground hover:bg-transparent"}`}
       style={{ "padding-left": `${sidebarCollapsed() ? 0 : 8 + Math.max(0, depth - 1) * 16}px` }}
       title={entry.label}
       aria-label={entry.label}
-      aria-current={activeMenuEntryId() === entry.id ? "page" : undefined}
+      aria-current={active() ? "page" : undefined}
       href={menuHref(entry)}
       onClick={(event) => followMenuLink(entry, event)}
       target={entry.type === "external" ? "_blank" : undefined}
       rel={entry.type === "external" ? "noopener noreferrer" : undefined}
-    >{icon}<Show when={!sidebarCollapsed()}><span class="min-w-0 flex-1 truncate">{entry.label}</span></Show></a>;
+    >{icon}<Show when={!sidebarCollapsed()}><span class="min-w-0 flex-1 truncate">{entry.label}</span></Show></a>
+    <Show when={!sidebarCollapsed()}><Button type="button" variant="ghost" size="icon" class="size-7 shrink-0 text-muted-foreground opacity-0 transition-opacity hover:bg-background hover:text-foreground hover:shadow-sm focus-visible:opacity-100 group-hover/entry:opacity-100 hover:opacity-100" aria-label={`Edit entry ${entry.label}`} title={`Edit ${entry.label}`} onClick={() => { setSidebarAddEntryTo(undefined); setSidebarEditItemId(entry.id); }}><Pencil class="size-3.5" /></Button></Show>
+    </div>;
   }
 
   function renderSidebarEntry(entry: NavigationEntry, depth = 0) {
     if (entry.visible === false) return null;
-    if (entry.type !== "group") return renderSidebarLink(entry, depth);
-    if (depth === 0) {
-      const expanded = () => menuGroupExpanded(entry);
+    if (entry.type === "section") {
       return <section class="mb-4" aria-label={`${entry.label} menu`}>
-        <div class={`group/header relative mb-1 flex min-h-9 items-center rounded-md ${sidebarCollapsed() ? "justify-center px-0" : "px-1"}`}>
-          <Show when={entry.chevron === true} fallback={<Show when={!sidebarCollapsed()}><h2 class="min-w-0 flex-1 truncate px-1 py-1 text-[13px] font-medium text-muted-foreground">{entry.label}</h2></Show>}>
-            <button class={`flex min-w-0 items-center gap-2 rounded-md py-1 text-left text-[13px] font-medium text-muted-foreground hover:bg-accent/70 ${sidebarCollapsed() ? "h-9 w-full justify-center px-0" : "flex-1 px-1"}`} type="button" aria-expanded={expanded() ? "true" : "false"} onClick={() => toggleMenuGroup(entry)}><Show when={entry.icon}><Icon name={entry.icon ?? "grid"} class="size-4" /></Show><Show when={!sidebarCollapsed()}><span class="min-w-0 flex-1 truncate">{entry.label}</span><Icon name="down" class={`size-4 transition-transform ${expanded() ? "rotate-0" : "-rotate-90"}`} /></Show></button>
-          </Show>
+        <div class={`group/header relative mb-1 flex min-h-9 items-center rounded-md transition-colors hover:bg-accent/70 ${sidebarCollapsed() ? "justify-center px-0" : "px-1"}`}>
+          <Show when={!sidebarCollapsed()}><h2 class="min-w-0 flex-1 truncate px-1 py-2 text-[13px] font-medium text-muted-foreground">{entry.label}</h2></Show>
           {renderSidebarGroupActions(entry)}
         </div>
-        <Show when={entry.chevron !== true || expanded()}><ul class="m-0 list-none p-0"><For each={entry.children}>{(child) => <li>{renderSidebarEntry(child, depth + 1)}</li>}</For></ul></Show>
+        <ul class="m-0 list-none p-0"><For each={entry.children}>{(child) => <li>{renderSidebarEntry(child, depth + 1)}</li>}</For></ul>
       </section>;
     }
+    if (entry.type !== "group") return renderSidebarLink(entry, depth);
     const expanded = () => menuGroupExpanded(entry);
     return <div class="mb-0.5">
-      <div class="flex items-center" style={{ "padding-left": `${sidebarCollapsed() ? 0 : Math.max(0, depth - 1) * 16}px` }}>
-        <button class={`flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded-md text-left text-sm text-foreground hover:bg-accent/70 ${sidebarCollapsed() ? "justify-center px-0" : "px-2"}`} type="button" title={entry.label} aria-label={entry.label} aria-expanded={expanded() ? "true" : "false"} onClick={() => toggleMenuGroup(entry)}>
+      <div class="group/menu-row flex items-center rounded-md transition-colors hover:bg-accent/70" style={{ "padding-left": `${sidebarCollapsed() ? 0 : Math.max(0, depth - 1) * 16}px` }}>
+        <button class={`flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded-md text-left text-sm text-foreground ${sidebarCollapsed() ? "justify-center px-0" : "px-2"}`} type="button" title={entry.label} aria-label={entry.label} aria-expanded={expanded() ? "true" : "false"} onClick={() => toggleMenuGroup(entry)}>
           <Icon name={entry.icon ?? "grid"} class="size-4 shrink-0" /><Show when={!sidebarCollapsed()}><span class="min-w-0 flex-1 truncate">{entry.label}</span><Show when={entry.chevron !== false}><Icon name="down" class={`size-4 transition-transform ${expanded() ? "rotate-0" : "-rotate-90"}`} /></Show></Show>
         </button>
         {renderSidebarGroupActions(entry)}
@@ -480,7 +514,7 @@ export default function App() {
 
   function renderTopEntry(entry: NavigationEntry) {
     if (entry.visible === false) return null;
-    if (entry.type === "group") return <><span class="px-2 text-[13px] font-medium text-muted-foreground">{entry.label}</span><For each={entry.children}>{(child) => renderTopEntry(child)}</For></>;
+    if (isNavigationContainer(entry)) return <><span class="px-2 text-[13px] font-medium text-muted-foreground">{entry.label}</span><For each={entry.children}>{(child) => renderTopEntry(child)}</For></>;
     if (entry.type === "action") return <a class={`flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] no-underline ${studioOpen() ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`} aria-label={entry.label} aria-current={studioOpen() ? "page" : undefined} href={menuHref(entry)} onClick={(event) => followMenuLink(entry, event)}><Icon name={entry.icon ?? "settings"} />{entry.label}</a>;
     return <a class="rounded-md px-2 py-1.5 text-[13px] text-muted-foreground no-underline hover:bg-accent hover:text-foreground" href={menuHref(entry)} onClick={(event) => followMenuLink(entry, event)} target={entry.type === "external" ? "_blank" : undefined} rel={entry.type === "external" ? "noopener noreferrer" : undefined}>{entry.label}</a>;
   }
@@ -494,7 +528,7 @@ export default function App() {
   function findAdminPanelEntry(entries: NavigationEntry[] = menuEntries(navigation())): Extract<NavigationEntry, { type: "action" }> | undefined {
     for (const entry of entries) {
       if (entry.type === "action" && entry.action === "admin-panel") return entry;
-      if (entry.type === "group") {
+      if (isNavigationContainer(entry)) {
         const nested = findAdminPanelEntry(entry.children);
         if (nested) return nested;
       }
@@ -507,6 +541,7 @@ export default function App() {
     const sidebar = config.shell?.sidebar ?? defaultNavigation.shell?.sidebar;
     if (!sidebar) return config;
     let removedLegacyEntry = false;
+    let migratedRootGroups = false;
     const removeLegacyEntries = (entries: NavigationEntry[]): NavigationEntry[] => {
       const cleaned: NavigationEntry[] = [];
       for (const entry of entries) {
@@ -514,7 +549,7 @@ export default function App() {
           removedLegacyEntry = true;
           continue;
         }
-        if (entry.type !== "group") {
+        if (!isNavigationContainer(entry)) {
           cleaned.push(entry);
           continue;
         }
@@ -524,9 +559,17 @@ export default function App() {
       }
       return cleaned;
     };
-    const menus = config.menus.map((menu) => ({ ...menu, entries: removeLegacyEntries(menu.entries) }));
+    const menus = config.menus.map((menu) => ({
+      ...menu,
+      entries: removeLegacyEntries(menu.entries).map((entry) => {
+        if (entry.type !== "group") return entry;
+        migratedRootGroups = true;
+        const { chevron: _chevron, defaultExpanded: _defaultExpanded, ...section } = entry;
+        return { ...section, type: "section" as const };
+      }),
+    }));
     const adminMenuSettingsPath = sidebar.adminMenuSettingsPath ?? legacyEntry?.path;
-    if (!removedLegacyEntry && adminMenuSettingsPath === sidebar.adminMenuSettingsPath) return config;
+    if (!removedLegacyEntry && !migratedRootGroups && adminMenuSettingsPath === sidebar.adminMenuSettingsPath) return config;
     const shell = config.shell ?? defaultNavigation.shell;
     if (!shell) return config;
     return {
@@ -551,7 +594,7 @@ export default function App() {
   function findRouteMenuEntryId(routeId: string, entries: NavigationEntry[] = menuEntries(navigation())): string | undefined {
     for (const entry of entries) {
       if (entry.type === "route" && entry.routeId === routeId) return entry.id;
-      if (entry.type === "group") {
+      if (isNavigationContainer(entry)) {
         const nested = findRouteMenuEntryId(routeId, entry.children);
         if (nested) return nested;
       }
@@ -708,46 +751,8 @@ export default function App() {
         </main>
         <footer class="flex h-7 items-center border-t border-border px-4 text-[10px] text-muted-foreground"><span>{workspaceStatus()}</span><span class="ml-auto hidden sm:inline">Modulaga workspace shell</span></footer>
       </div>
-      <Show when={sidebarAddEntryTo()}>
-        <div class="fixed inset-0 z-[100] grid place-items-center overflow-y-auto bg-black/50 p-4" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) closeSidebarAddEntry(); }} onKeyDown={(event) => { if (event.key === "Escape") closeSidebarAddEntry(); }}>
-          <section class="w-full max-w-md rounded-xl border border-border bg-background p-6 text-foreground shadow-xl" role="dialog" aria-modal="true" aria-labelledby="add-menu-entry-title" aria-describedby="add-menu-entry-description">
-            <div class="mb-5 flex items-start justify-between gap-4">
-              <div><h2 id="add-menu-entry-title" class="text-lg font-semibold tracking-tight">Add menu entry</h2><p id="add-menu-entry-description" class="mt-1 text-sm text-muted-foreground">Add a configured workspace route to the sidebar.</p></div>
-              <Button type="button" variant="ghost" size="icon" class="-mr-2 -mt-2" aria-label="Close dialog" onClick={closeSidebarAddEntry}>×</Button>
-            </div>
-            <form class="space-y-4" onSubmit={addSidebarEntry}>
-              <div class="space-y-2">
-                <label class="text-sm font-medium" for="sidebar-entry-group">Menu group</label>
-                <select id="sidebar-entry-group" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring" value={sidebarAddEntryTo()} onChange={(event) => setSidebarAddEntryTo(event.currentTarget.value)} required>
-                  <For each={configuredMenuGroups()}>{(group) => <option value={group.id}>{group.label}</option>}</For>
-                </select>
-              </div>
-              <div class="space-y-2">
-                <label class="text-sm font-medium" for="sidebar-entry-label">Entry name</label>
-                <input id="sidebar-entry-label" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring" value={sidebarNewEntryLabel()} onInput={(event) => setSidebarNewEntryLabel(event.currentTarget.value)} placeholder="e.g. Reports" required />
-              </div>
-              <div class="space-y-2">
-                <label class="text-sm font-medium" for="sidebar-entry-route">Route</label>
-                <select id="sidebar-entry-route" class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm outline-none focus-visible:ring-1 focus-visible:ring-ring" value={sidebarNewRouteId()} onChange={(event) => setSidebarNewRouteId(event.currentTarget.value)} required>
-                  <For each={navigation().routes}>{(route) => <option value={route.id}>{route.path}</option>}</For>
-                </select>
-              </div>
-              <div class="space-y-2">
-                <label class="text-sm font-medium" for="sidebar-entry-icon">Icon</label>
-                <div class="flex items-center gap-2">
-                  <span class="grid size-9 shrink-0 place-items-center rounded-md border border-input bg-muted/30"><Icon name={sidebarNewEntryIcon() || "grid"} /></span>
-                  <input id="sidebar-entry-icon" list="sidebar-configured-icons" class="flex h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring" value={sidebarNewEntryIcon()} onInput={(event) => setSidebarNewEntryIcon(event.currentTarget.value)} placeholder="Icon name" />
-                  <datalist id="sidebar-configured-icons"><For each={configuredIcons()}>{(icon) => <option value={icon} />}</For></datalist>
-                </div>
-                <p class="text-xs text-muted-foreground">Choose an icon name already used in this workspace menu.</p>
-              </div>
-              <div class="flex justify-end gap-2 pt-2">
-                <Button type="button" variant="outline" onClick={closeSidebarAddEntry}>Cancel</Button>
-                <Button type="submit" disabled={!configuredMenuGroups().length || !navigation().routes.length || !sidebarNewEntryLabel().trim()}>Add entry</Button>
-              </div>
-            </form>
-          </section>
-        </div>
+      <Show when={currentSidebarDialog()} keyed>
+        {(dialog) => <AddMenuItemDialog entries={menuEntries(navigation())} parentId={dialog.kind === "create" ? dialog.parent.id : dialog.parentId} item={dialog.kind === "edit" ? dialog.item : undefined} routes={navigation().routes} onCancel={closeSidebarAddEntry} onSave={saveSidebarDialogItem} />}
       </Show>
     </div>
   );

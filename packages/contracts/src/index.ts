@@ -18,6 +18,7 @@ export type {
   MenuEntry,
   MenuGroup,
   MenuPlacement,
+  MenuSection,
   ShellSettings,
   SidebarSettings,
   ThemeReference,

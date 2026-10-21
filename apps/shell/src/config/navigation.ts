@@ -5,13 +5,15 @@ export type RouteMenuEntry = NavigationBase & { type: "route"; routeId: string }
 export type ExternalMenuEntry = NavigationBase & { type: "external"; href: string };
 export type ActionMenuEntry = NavigationBase & { type: "action"; action: "admin-panel"; path: string };
 export type NavigationLink = RouteMenuEntry | ExternalMenuEntry | ActionMenuEntry;
+export type NavigationSection = NavigationBase & { type: "section"; children: NavigationEntry[] };
 export type NavigationGroup = NavigationBase & {
   type: "group";
   children: NavigationEntry[];
   chevron?: boolean;
   defaultExpanded?: boolean;
 };
-export type NavigationEntry = NavigationLink | NavigationGroup;
+export type NavigationContainer = NavigationSection | NavigationGroup;
+export type NavigationEntry = NavigationLink | NavigationContainer;
 export type DashboardWidget = { id: string; installationId: string; componentId: string; settings: { schemaId: string; value: Record<string, unknown> } };
 
 export type WorkspaceNavigation = {
@@ -44,7 +46,7 @@ function isNavigationEntry(value: unknown): value is NavigationEntry {
   if (!value || typeof value !== "object") return false;
   const entry = value as NavigationEntry;
   if (typeof entry.id !== "string" || !entry.id || typeof entry.label !== "string" || !entry.label) return false;
-  if (entry.type === "group") return Array.isArray(entry.children) && entry.children.every(isNavigationEntry);
+  if (entry.type === "group" || entry.type === "section") return Array.isArray(entry.children) && entry.children.every(isNavigationEntry);
   if (entry.type === "route") return typeof entry.routeId === "string";
   if (entry.type === "external") return typeof entry.href === "string" && entry.href.startsWith("https://");
   return entry.type === "action"
@@ -55,6 +57,9 @@ function isNavigationEntry(value: unknown): value is NavigationEntry {
     && !entry.path.includes("?")
     && !entry.path.includes("#");
 }
+
+export const isNavigationContainer = (entry: NavigationEntry): entry is NavigationContainer =>
+  entry.type === "section" || entry.type === "group";
 
 function isWorkspaceNavigation(value: unknown): value is WorkspaceNavigation {
   if (!value || typeof value !== "object") return false;

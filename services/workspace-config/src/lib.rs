@@ -700,7 +700,8 @@ pub fn validate_workspace_config(config: &Value) -> Result<(), String> {
             .get("entries")
             .and_then(Value::as_array)
             .ok_or("menu entries must be an array")?;
-        validate_entries(entries, &route_ids, 0)?;
+        let mut entry_ids = std::collections::HashSet::new();
+        validate_entries(entries, &route_ids, 0, &mut entry_ids)?;
     }
     let placements = root
         .get("menuPlacements")
@@ -731,17 +732,17 @@ fn validate_entries(
     entries: &[Value],
     route_ids: &std::collections::HashSet<&str>,
     depth: usize,
+    entry_ids: &mut std::collections::HashSet<String>,
 ) -> Result<(), String> {
-    if depth > 2 {
-        return Err("menu groups may only be nested one level".into());
+    if depth > 8 {
+        return Err("menu nesting may not exceed eight levels".into());
     }
-    let mut ids = std::collections::HashSet::new();
     for entry in entries {
         let id = entry
             .get("id")
             .and_then(Value::as_str)
             .ok_or("each menu entry needs an id")?;
-        if !valid_identifier(id) || !ids.insert(id) {
+        if !valid_identifier(id) || !entry_ids.insert(id.to_owned()) {
             return Err("menu entry IDs must be valid and unique within each menu".into());
         }
         if entry
@@ -753,14 +754,26 @@ fn validate_entries(
             return Err("menu entry labels must contain 1 to 80 characters".into());
         }
         match entry.get("type").and_then(Value::as_str) {
-            Some("group") => validate_entries(
+            Some("section") if depth == 0 => validate_entries(
+                entry
+                    .get("children")
+                    .and_then(Value::as_array)
+                    .ok_or("sections need a children array")?,
+                route_ids,
+                depth + 1,
+                entry_ids,
+            )?,
+            Some("section") => return Err("sections are only allowed at the menu root".into()),
+            Some("group") if depth > 0 => validate_entries(
                 entry
                     .get("children")
                     .and_then(Value::as_array)
                     .ok_or("groups need a children array")?,
                 route_ids,
                 depth + 1,
+                entry_ids,
             )?,
+            Some("group") => return Err("menu groups must be inside a section or group".into()),
             Some("route")
                 if route_ids
                     .contains(entry.get("routeId").and_then(Value::as_str).unwrap_or("")) => {}
@@ -789,7 +802,7 @@ fn validate_entries(
                 }
             }
             Some("action") => return Err("menu action is unsupported".into()),
-            _ => return Err("menu entry type must be group, route, external, or action".into()),
+            _ => return Err("menu entry type must be section, group, route, external, or action".into()),
         }
     }
     Ok(())
@@ -1099,7 +1112,7 @@ mod tests {
             "welcomePage":{"enabled":true,"title":"Welcome","description":"Demo workspace","showDashboard":true},
             "installations":[{"id":"orders-installation"}],
             "routes":[{"id":"orders","installationId":"orders-installation","path":"/orders"}],
-            "menus":[{"id":"primary","name":"Primary","entries":[{"id":"orders-link","type":"route","label":"Orders","routeId":"orders"}]}],
+            "menus":[{"id":"primary","name":"Primary","entries":[{"id":"operations","type":"section","label":"Operations","children":[{"id":"orders-link","type":"route","label":"Orders","routeId":"orders"},{"id":"issues","type":"group","label":"Issues","children":[{"id":"issue-lists","type":"group","label":"Lists","children":[{"id":"issue-list","type":"route","label":"Issue list","routeId":"orders"}]}]}]}]}],
             "menuPlacements":[{"menuId":"primary","region":"left"}],
             "shell":{"sidebar":{"width":280,"mode":"collapsible"},"breadcrumbs":{"enabled":true,"maxDepth":5}},
             "dashboards":[{"id":"overview","routeId":"orders","columns":3,"widgets":[]}]
@@ -1175,38 +1188,42 @@ mod tests {
     #[test]
     fn validates_menu_types_links_nesting_and_references() {
         let mut value = fixture();
-        value["menus"][0]["entries"][0]["routeId"] = "missing".into();
+        value["menus"][0]["entries"][0]["children"][0]["routeId"] = "missing".into();
         assert!(
             validate_workspace_config(&value)
                 .unwrap_err()
                 .contains("unknown route")
         );
         let mut value = fixture();
-        value["menus"][0]["entries"][0] = serde_json::json!({"id":"external","type":"external","label":"Help","href":"http://unsafe.test"});
+        value["menus"][0]["entries"][0]["children"][0] = serde_json::json!({"id":"external","type":"external","label":"Help","href":"http://unsafe.test"});
         assert!(
             validate_workspace_config(&value)
                 .unwrap_err()
                 .contains("HTTPS")
         );
         let mut value = fixture();
-        value["menus"][0]["entries"][0] = serde_json::json!({"id":"group","type":"group","label":"Nested","children":[{"id":"g2","type":"group","label":"Nested again","children":[{"id":"g3","type":"group","label":"Too deep","children":[]}]}]});
+        value["menus"][0]["entries"][0] = serde_json::json!({"id":"group","type":"group","label":"Not at root","children":[]});
         assert!(
             validate_workspace_config(&value)
                 .unwrap_err()
-                .contains("nested one level")
+                .contains("inside a section or group")
         );
+
+        let mut value = fixture();
+        value["menus"][0]["entries"].as_array_mut().unwrap().push(serde_json::json!({
+            "id":"help-link","type":"external","label":"Help center","href":"https://example.com/help"
+        }));
+        assert!(validate_workspace_config(&value).is_ok());
     }
     #[test]
     fn accepts_admin_panel_actions_in_workspace_menus() {
         let mut value = fixture();
         value["menus"][0]["entries"].as_array_mut().unwrap().push(serde_json::json!({
-            "id":"settings",
-            "type":"group",
+            "id":"admin-settings-section",
+            "type":"section",
             "label":"Settings",
             "icon":"settings",
             "visible":true,
-            "chevron":false,
-            "defaultExpanded":true,
             "children":[{"id":"admin-panel","type":"action","label":"Admin Panel","action":"admin-panel","path":"/settings/admin-panel","icon":"settings","visible":true}]
         }));
         assert!(validate_workspace_config(&value).is_ok());
