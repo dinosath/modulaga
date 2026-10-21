@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "apps": [
+    {
+      "id": "orders",
+      "name": "Orders",
+      "publisher": {
+        "id": "modulaga-demo",
+        "name": "Modulaga Demo"
+      },
+      "description": "A sample order-management remote.",
+      "tags": ["operations", "demo"],
+      "releases": [
+        {
+          "id": "orders@1.2.0",
+          "version": "1.2.0",
+          "publishedAt": "2026-09-01T12:00:00Z",
+          "manifestUrl": "https://apps.example.com/orders/1.2.0/mf-manifest.json",
+          "remoteName": "orders_remote",
+          "exposedModule": "./mount",
+          "integrity": "sha384-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "requiredCapabilities": ["workspace:read"],
+          "compatibility": {
+            "lifecycleContractVersion": "1.0.0",
+            "minimumShellVersion": "0.1.0",
+            "federationFormat": "module-federation",
+            "remoteType": "module",
+            "designSystemVersion": "1.0.0"
+          }
+        }
+      ]
+    }
+  ]
+}

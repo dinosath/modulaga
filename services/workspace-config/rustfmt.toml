@@ -1,0 +1,49 @@
+# Line endings and whitespace hygiene
+newline_style = "Unix"            # LF newlines for macOS/Linux
+trim_whitespace = true            # Remove trailing whitespace
+tab_spaces = 4                    # Standard Rust indentation
+
+# Overall width and heuristics
+max_width = 100                   # Keep lines readable
+use_small_heuristics = "Max"      # Favor multiline when near the width limit
+
+# Imports organization
+reorder_imports = true
+group_imports = "StdExternalCrate"   # Group: std, external, crate
+imports_granularity = "Crate"        # Merge same-crate imports into a single use
+reorder_modules = true
+
+# Attribute and derive handling
+merge_derives = true               # Combine multiple derives into one
+normalize_doc_attributes = true    # Normalize doc attributes like #[doc = "..."] → ///
+
+# Comments and doc comments
+wrap_comments = true               # Reflow long comments to max_width
+format_code_in_doc_comments = true # Format rust code blocks in doc comments
+
+# Macros and strings
+format_macro_bodies = true
+format_strings = true
+
+# Structs, enums, and alignment
+struct_field_align_threshold = 20      # Align fields if short enough
+enum_discrim_align_threshold = 20      # Align enum discriminants if short enough
+fn_args_layout = "Compressed"          # Compact function args when reasonable
+where_single_line = false              # Prefer multiline where-clauses if they get long
+
+# Trailing commas encourage cleaner diffs and easier reordering
+trailing_comma = "Always"
+
+# Misc readability preferences
+brace_style = "SameLineWhere"
+control_brace_style = "AlwaysSameLine"
+spaces_around_ranges = true
+
+# Keep consistent formatting for chain calls
+chain_indent = "Visual"
+
+# Keep comments with items where possible
+comment_width = 100
+
+# Edition-specific: prefer 2021 idioms
+edition = "2024"

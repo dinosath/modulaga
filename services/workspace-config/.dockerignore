@@ -1,0 +1,8 @@
+**/.git
+**/.gitignore
+**/.idea
+**/.github
+**/target
+**/node_modules
+**/.vite
+**/*.log

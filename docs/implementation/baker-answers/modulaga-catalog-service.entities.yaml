@@ -1,0 +1,173 @@
+entities:
+  Publisher:
+    kind: collectionType
+    collectionName: publishers
+    priority: 1
+    info:
+      displayName: Publisher
+      singularName: publisher
+      pluralName: publishers
+      description: Publisher identity and trust status for catalog applications
+    attributes:
+      publisher_key:
+        type: string
+        required: true
+        unique: true
+        maxLength: 128
+      display_name:
+        type: string
+        required: true
+        maxLength: 160
+      description:
+        type: string
+        required: false
+        maxLength: 2048
+      status:
+        type: string
+        required: true
+        maxLength: 32
+      applications:
+        type: relation
+        relation: oneToMany
+        target: CatalogApp
+        required: false
+        mappedBy: publisher
+  CatalogApp:
+    kind: collectionType
+    collectionName: catalog_apps
+    priority: 2
+    info:
+      displayName: Catalog app
+      singularName: catalog-app
+      pluralName: catalog-apps
+      description: Stable catalog identity for a publishable application
+    attributes:
+      app_id:
+        type: string
+        required: true
+        unique: true
+        maxLength: 128
+      name:
+        type: string
+        required: true
+        maxLength: 160
+      summary:
+        type: string
+        required: false
+        maxLength: 2048
+      icon_url:
+        type: string
+        required: false
+        maxLength: 2048
+      status:
+        type: string
+        required: true
+        maxLength: 32
+      publisher:
+        type: relation
+        relation: manyToOne
+        target: Publisher
+        required: true
+        mappedBy: applications
+      releases:
+        type: relation
+        relation: oneToMany
+        target: AppRelease
+        required: false
+        mappedBy: app
+  AppRelease:
+    kind: collectionType
+    collectionName: app_releases
+    priority: 3
+    info:
+      displayName: App release
+      singularName: app-release
+      pluralName: app-releases
+      description: Immutable, versioned catalog release and its validated descriptor
+    attributes:
+      release_id:
+        type: string
+        required: true
+        unique: true
+        maxLength: 160
+      version:
+        type: string
+        required: true
+        maxLength: 64
+      status:
+        type: string
+        required: true
+        maxLength: 32
+      descriptor_json:
+        type: string
+        required: true
+        maxLength: 262144
+      content_hash:
+        type: string
+        required: true
+        maxLength: 128
+      published_at:
+        type: string
+        required: false
+        maxLength: 64
+      app:
+        type: relation
+        relation: manyToOne
+        target: CatalogApp
+        required: true
+        mappedBy: releases
+      components:
+        type: relation
+        relation: oneToMany
+        target: ReleaseComponent
+        required: false
+        mappedBy: release
+  ReleaseComponent:
+    kind: collectionType
+    collectionName: release_components
+    priority: 4
+    info:
+      displayName: Release component
+      singularName: release-component
+      pluralName: release-components
+      description: Component metadata and settings schema included in an immutable release
+    attributes:
+      release_component_key:
+        type: string
+        required: true
+        unique: true
+        maxLength: 320
+      component_id:
+        type: string
+        required: true
+        maxLength: 128
+      component_type:
+        type: string
+        required: true
+        maxLength: 64
+      display_name:
+        type: string
+        required: true
+        maxLength: 160
+      exposed_module:
+        type: string
+        required: true
+        maxLength: 255
+      settings_schema_json:
+        type: string
+        required: false
+        maxLength: 65535
+      default_settings_json:
+        type: string
+        required: false
+        maxLength: 65535
+      capabilities_json:
+        type: string
+        required: false
+        maxLength: 65535
+      release:
+        type: relation
+        relation: manyToOne
+        target: AppRelease
+        required: true
+        mappedBy: components

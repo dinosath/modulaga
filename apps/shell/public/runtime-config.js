@@ -1,0 +1,1 @@
+window.MODULAGA_CONFIG = {};

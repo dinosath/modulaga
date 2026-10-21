@@ -1,0 +1,201 @@
+services:
+  modulaga-db:
+    image: postgres:18.2
+    environment:
+      POSTGRES_DB: modulaga
+      POSTGRES_USER: modulaga
+      POSTGRES_PASSWORD: modulaga
+    ports:
+      - "5432:5432"
+    volumes:
+      - modulaga_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U modulaga -d modulaga"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    profiles: [registry]
+
+  ferriskey-db:
+    image: postgres:18.2
+    environment:
+      POSTGRES_DB: ferriskey
+      POSTGRES_USER: ferriskey
+      POSTGRES_PASSWORD: ferriskey
+    ports:
+      - "5433:5432"
+    volumes:
+      - ferriskey_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ferriskey -d ferriskey"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    profiles: [local, registry]
+
+  ferriskey-migrate:
+    image: ${FERRISKEY_API_IMAGE:-ghcr.io/ferriskey/ferriskey-api:${FERRISKEY_TAG:-latest}}
+    entrypoint: ["sqlx"]
+    command: ["migrate", "run", "--source", "/usr/local/src/ferriskey/migrations"]
+    environment:
+      DATABASE_URL: postgresql://ferriskey:ferriskey@ferriskey-db/ferriskey
+    depends_on:
+      ferriskey-db:
+        condition: service_healthy
+    restart: "no"
+    profiles: [local, registry]
+
+  ferriskey-api:
+    image: ${FERRISKEY_API_IMAGE:-ghcr.io/ferriskey/ferriskey-api:${FERRISKEY_TAG:-latest}}
+    environment:
+      ALLOWED_ORIGINS: http://localhost:4310,http://127.0.0.1:4310,http://localhost:5556
+      SERVER_PUBLIC_URL: http://localhost:3333
+      WEBAPP_URL: http://localhost:5556
+      DATABASE_HOST: ferriskey-db
+      DATABASE_NAME: ferriskey
+      DATABASE_PASSWORD: ferriskey
+      DATABASE_USER: ferriskey
+      ADMIN_USERNAME: ${FERRISKEY_ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${FERRISKEY_ADMIN_PASSWORD:-admin}
+      ADMIN_EMAIL: ${FERRISKEY_ADMIN_EMAIL:-admin@localhost}
+    ports:
+      - "3333:3333"
+    depends_on:
+      ferriskey-migrate:
+        condition: service_completed_successfully
+    profiles: [local, registry]
+
+  ferriskey-console:
+    image: ${FERRISKEY_WEBAPP_IMAGE:-ghcr.io/ferriskey/ferriskey-webapp:${FERRISKEY_TAG:-latest}}
+    environment:
+      API_URL: http://localhost:3333
+    ports:
+      - "5556:80"
+    depends_on:
+      - ferriskey-api
+    profiles: [local, registry]
+
+  workspace-config-local:
+    image: modulaga/workspace-config:local
+    build:
+      context: .
+      dockerfile: services/workspace-config/Dockerfile
+    environment:
+      WORKSPACE_STORE: sqlite
+      DATABASE_URL: sqlite:///app/data/workspace-config.sqlite?mode=rwc
+      DEFAULT_WORKSPACE_CONFIG_PATH: /app/workspace-config/workspaces/default.json
+      AUTH_MODE: disabled
+      ALLOWED_ORIGINS: http://localhost:4310,http://127.0.0.1:4310
+      RUST_LOG: info
+    ports:
+      - "4303:4303"
+    volumes:
+      - ./workspace-config:/app/workspace-config:ro
+      - modulaga_config_data:/app/data
+    profiles: [local]
+
+  workspace-config:
+    image: ${MODULAGA_CONFIG_IMAGE:-ghcr.io/modulaga/workspace-config:${MODULAGA_TAG:-latest}}
+    environment:
+      DATABASE_URL: postgres://modulaga:modulaga@modulaga-db:5432/modulaga
+      DEFAULT_WORKSPACE_CONFIG_PATH: /app/workspace-config/workspaces/default.json
+      AUTH_MODE: oidc
+      OIDC_ISSUER: ${OIDC_ISSUER:-http://localhost:3333/realms/modulaga}
+      OIDC_DISCOVERY_URL: http://ferriskey-api:3333/realms/modulaga/.well-known/openid-configuration
+      OIDC_JWKS_URI: http://ferriskey-api:3333/realms/modulaga/protocol/openid-connect/certs
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+      OIDC_ADMIN_ROLE: ${OIDC_ADMIN_ROLE:-modulaga-admin}
+      ALLOWED_ORIGINS: http://localhost:4310,http://127.0.0.1:4310
+      RUST_LOG: info
+    ports:
+      - "4303:4303"
+    volumes:
+      - ./workspace-config:/app/workspace-config:ro
+    depends_on:
+      modulaga-db:
+        condition: service_healthy
+      ferriskey-api:
+        condition: service_started
+    profiles: [registry]
+
+  app-catalog-local:
+    image: modulaga/app-catalog:local
+    build:
+      context: .
+      dockerfile: services/workspace-config/Dockerfile
+    command: ["/usr/local/bin/app-catalog"]
+    environment:
+      ALLOWED_ORIGINS: http://localhost:4310,http://127.0.0.1:4310
+      CATALOG_BIND_ADDRESS: 0.0.0.0:4304
+      CATALOG_PATH: /app/fixtures/catalog.local.json
+      RUST_LOG: info
+    ports:
+      - "4304:4304"
+    volumes:
+      - ./workspace-config:/app/workspace-config:ro
+      - ./fixtures:/app/fixtures:ro
+    profiles: [local]
+
+  app-catalog:
+    image: ${MODULAGA_CATALOG_IMAGE:-ghcr.io/modulaga/app-catalog:${MODULAGA_TAG:-latest}}
+    environment:
+      CATALOG_PATH: /app/workspace-config/catalog.json
+      CATALOG_BIND_ADDRESS: 0.0.0.0:4304
+      ALLOWED_ORIGINS: http://localhost:4310,http://127.0.0.1:4310
+    volumes:
+      - ./workspace-config:/app/workspace-config:ro
+    ports:
+      - "4304:4304"
+    profiles: [registry]
+
+  shell-local:
+    image: modulaga/shell:local
+    build:
+      context: .
+      dockerfile: apps/shell/Dockerfile
+    environment:
+      MODULAGA_CONFIG_API_URL: http://localhost:4303
+      MODULAGA_CATALOG_API_URL: http://localhost:4304
+      MODULAGA_WORKSPACE_ID: default
+      MODULAGA_FERRISKEY_ISSUER: ""
+      MODULAGA_FERRISKEY_CLIENT_ID: ""
+    ports:
+      - "4310:80"
+    depends_on:
+      - workspace-config-local
+      - app-catalog-local
+    profiles: [local]
+
+  shell:
+    image: ${MODULAGA_SHELL_IMAGE:-ghcr.io/modulaga/shell:${MODULAGA_TAG:-latest}}
+    environment:
+      MODULAGA_CONFIG_API_URL: ${MODULAGA_CONFIG_API_URL:-http://localhost:4303}
+      MODULAGA_WORKSPACE_ID: ${MODULAGA_WORKSPACE_ID:-default}
+      MODULAGA_FERRISKEY_ISSUER: ${OIDC_ISSUER:-http://localhost:3333/realms/modulaga}
+      MODULAGA_FERRISKEY_CLIENT_ID: ${FERRISKEY_CLIENT_ID:-modulaga-shell}
+    ports:
+      - "4310:80"
+    depends_on:
+      - workspace-config
+      - app-catalog
+    profiles: [registry]
+
+  demo-react-local:
+    image: modulaga/demo-react:local
+    build:
+      context: .
+      dockerfile: apps/demo-react/Dockerfile
+    ports:
+      - "4174:80"
+    profiles: [local]
+
+  demo-react:
+    image: ${MODULAGA_DEMO_REACT_IMAGE:-ghcr.io/modulaga/demo-react:${MODULAGA_TAG:-latest}}
+    ports:
+      - "4174:80"
+    profiles: [registry]
+
+volumes:
+  modulaga_data:
+  modulaga_config_data:
+  ferriskey_data:

@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: modulaga-config-api-deployment
+  labels:
+    app: modulaga-config-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: modulaga-config-api
+  template:
+    metadata:
+      labels:
+        app: modulaga-config-api
+    spec:
+      containers:
+        - name: modulaga-config-api
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          ports:
+            - containerPort: {{ .Values.service.port }}

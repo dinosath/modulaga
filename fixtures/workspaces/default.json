@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 1,
+  "workspace": {
+    "id": "default",
+    "name": "Default workspace"
+  },
+  "welcomePage": {
+    "enabled": true,
+    "title": "Welcome to Modulaga",
+    "description": "Your workspace, apps, and dashboards in one place.",
+    "showDashboard": true
+  },
+  "installations": [
+    {
+      "id": "orders-installation",
+      "appId": "orders",
+      "releaseId": "orders@1.2.0",
+      "basePath": "/orders",
+      "settings": {
+        "schemaId": "orders-install-settings",
+        "value": {}
+      }
+    }
+  ],
+  "routes": [
+    {
+      "id": "orders-overview",
+      "installationId": "orders-installation",
+      "path": "/orders/overview"
+    },
+    {
+      "id": "orders-analytics",
+      "installationId": "orders-installation",
+      "path": "/orders/analytics"
+    }
+  ],
+  "menus": [
+    {
+      "id": "primary",
+      "name": "Primary navigation",
+      "entries": [
+        {
+          "id": "operations",
+          "type": "group",
+          "label": "Operations",
+          "icon": "briefcase",
+          "visible": true,
+          "chevron": false,
+          "defaultExpanded": true,
+          "children": [
+            {
+              "id": "orders-link",
+              "type": "route",
+              "label": "Orders",
+              "routeId": "orders-overview",
+              "icon": "cart",
+              "visible": true
+            },
+            {
+              "id": "analytics-link",
+              "type": "route",
+              "label": "Analytics",
+              "routeId": "orders-analytics",
+              "icon": "chart",
+              "visible": true
+            }
+          ]
+        },
+        {
+          "id": "settings",
+          "type": "group",
+          "label": "Settings",
+          "icon": "settings",
+          "visible": true,
+          "chevron": false,
+          "defaultExpanded": true,
+          "children": [
+            {
+              "id": "admin-panel",
+              "type": "action",
+              "label": "Admin Panel",
+              "action": "admin-panel",
+              "path": "/settings/admin-panel",
+              "icon": "settings",
+              "visible": true
+            }
+          ]
+        },
+        {
+          "id": "help-link",
+          "type": "external",
+          "label": "Help center",
+          "href": "https://example.com/help",
+          "icon": "grid",
+          "visible": true
+        }
+      ]
+    }
+  ],
+  "menuPlacements": [
+    {
+      "menuId": "primary",
+      "region": "left",
+      "renderer": "tree",
+      "breakpoint": "desktop"
+    }
+  ],
+  "shell": {
+    "sidebar": {
+      "width": 264,
+      "mode": "collapsible",
+      "defaultCollapsed": false
+    },
+    "breadcrumbs": {
+      "enabled": true,
+      "maxDepth": 5,
+      "separator": "/"
+    }
+  },
+  "dashboards": [
+    {
+      "id": "workspace-overview",
+      "title": "Workspace overview",
+      "routeId": "orders-overview",
+      "columns": 3,
+      "widgets": [
+        {
+          "id": "active-users-panel",
+          "installationId": "orders-installation",
+          "componentId": "stat-card",
+          "settings": { "schemaId": "modulaga-stat-card", "value": { "label": "Active users", "value": "2,847" } }
+        },
+        {
+          "id": "workspace-count-panel",
+          "installationId": "orders-installation",
+          "componentId": "stat-card",
+          "settings": { "schemaId": "modulaga-stat-card", "value": { "label": "Workspaces", "value": "12" } }
+        },
+        {
+          "id": "remote-count-panel",
+          "installationId": "orders-installation",
+          "componentId": "stat-card",
+          "settings": { "schemaId": "modulaga-stat-card", "value": { "label": "Microfrontends", "value": "8" } }
+        }
+      ]
+    }
+  ],
+  "layout": {
+    "template": "single-column",
+    "regions": [
+      {
+        "id": "main",
+        "order": 0,
+        "instances": []
+      }
+    ]
+  },
+  "theme": {
+    "id": "modulaga-default",
+    "version": "1.0.0"
+  }
+}

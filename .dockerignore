@@ -1,0 +1,10 @@
+.git
+.data
+.kilo
+node_modules
+**/node_modules
+**/target
+**/dist
+test-results
+playwright-report
+.DS_Store

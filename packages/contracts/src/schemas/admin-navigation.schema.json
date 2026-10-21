@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modulaga.dev/schemas/admin-navigation.schema.json",
+  "title": "AdminNavigation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "scope", "registeredViews", "sections"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "scope": { "$ref": "#/$defs/Scope" },
+    "registeredViews": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/RegisteredView" }
+    },
+    "sections": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/SectionNode" }
+    }
+  },
+  "$defs": {
+    "Identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+    },
+    "Scope": {
+      "title": "AdminNavigationScope",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "const": "deployment" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "tenantId"],
+          "properties": {
+            "type": { "const": "tenant" },
+            "tenantId": { "$ref": "#/$defs/Identifier" }
+          }
+        }
+      ]
+    },
+    "RegisteredView": {
+      "title": "RegisteredAdminView",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "requiredCapabilities"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "requiredCapabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 80 }
+        }
+      }
+    },
+    "SectionNode": {
+      "title": "AdminSectionNode",
+      "oneOf": [
+        { "$ref": "#/$defs/SectionGroup" },
+        { "$ref": "#/$defs/ViewLink" }
+      ]
+    },
+    "SectionGroup": {
+      "title": "AdminSectionGroup",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "label", "children"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "type": { "const": "group" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SectionNode" }
+        }
+      }
+    },
+    "ViewLink": {
+      "title": "AdminViewLink",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "label", "viewId"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "type": { "const": "view" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "viewId": { "$ref": "#/$defs/Identifier" }
+      }
+    }
+  }
+}

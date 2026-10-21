@@ -1,0 +1,33 @@
+# Enforce LF line endings for all text files
+* text=auto eol=lf
+
+# Explicitly ensure LF for common text/code formats
+*.rs   text eol=lf
+*.toml text eol=lf
+*.md   text eol=lf
+*.sh   text eol=lf
+*.jinja text eol=lf
+*.json text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.sql  text eol=lf
+
+# Treat common binary formats as binary (no line-ending conversions)
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.pdf  binary
+*.zip  binary
+*.gz   binary
+*.tar  binary
+*.bmp  binary
+*.ico  binary
+
+# CI and Docker-related files (still LF)
+Dockerfile* text eol=lf
+*.dockerignore text eol=lf
+
+# Ensure git modules and ignore files use LF
+*.gitattributes text eol=lf
+*.gitignore     text eol=lf

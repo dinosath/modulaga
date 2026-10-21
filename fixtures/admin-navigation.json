@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "scope": {
+    "type": "deployment"
+  },
+  "registeredViews": [
+    {
+      "id": "catalog",
+      "label": "App catalog",
+      "requiredCapabilities": ["catalog:read"]
+    },
+    {
+      "id": "workspace-settings",
+      "label": "Workspace settings",
+      "requiredCapabilities": ["workspace:manage"]
+    }
+  ],
+  "sections": [
+    {
+      "id": "applications",
+      "type": "group",
+      "label": "Applications",
+      "children": [
+        {
+          "id": "catalog-section",
+          "type": "view",
+          "label": "Browse apps",
+          "viewId": "catalog"
+        }
+      ]
+    },
+    {
+      "id": "workspace-section",
+      "type": "view",
+      "label": "Workspace settings",
+      "viewId": "workspace-settings"
+    }
+  ]
+}

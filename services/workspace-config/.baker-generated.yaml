@@ -1,0 +1,121 @@
+version: '1'
+generated_at: 2026-09-30T19:14:59.857037+00:00
+template:
+  type: filesystem
+  path: ../saas-templates
+  hash: 5dec783f0ca49174d3514d341013ea2dd370da8313348c2e327ee7f1458f1105
+answers:
+  add_migrations: true
+  authentication: jwt
+  automod: true
+  backend: axum
+  ci_cd:
+  - github
+  database: postgres
+  db_schema: public
+  docker_hardened_images: false
+  entities:
+    Application:
+      attributes:
+        exposed_module:
+          maxLength: 255
+          required: true
+          type: string
+        manifest_url:
+          maxLength: 2048
+          required: true
+          type: string
+        menu_entries:
+          mappedBy: application
+          relation: oneToMany
+          required: false
+          target: MenuEntry
+          type: relation
+        name:
+          maxLength: 80
+          required: true
+          type: string
+        remote_name:
+          maxLength: 255
+          required: true
+          type: string
+        route_path:
+          maxLength: 255
+          required: true
+          type: string
+          unique: true
+        workspace:
+          mappedBy: applications
+          relation: manyToOne
+          required: true
+          target: Workspace
+          type: relation
+      collectionName: applications
+      info:
+        description: Registered microfrontend application declarations
+        displayName: Application
+        pluralName: applications
+        singularName: application
+      kind: collectionType
+      priority: 2
+    MenuEntry:
+      attributes:
+        application:
+          mappedBy: menu_entries
+          relation: manyToOne
+          required: true
+          target: Application
+          type: relation
+        label:
+          maxLength: 80
+          required: true
+          type: string
+        position:
+          min: 0
+          required: true
+          type: integer
+          unique: true
+      collectionName: menu_entries
+      info:
+        description: Navigation item linked to an application
+        displayName: Menu entry
+        pluralName: menu-entries
+        singularName: menu-entry
+      kind: collectionType
+      priority: 3
+    Workspace:
+      attributes:
+        applications:
+          mappedBy: workspace
+          relation: oneToMany
+          required: false
+          target: Application
+          type: relation
+        name:
+          maxLength: 80
+          required: true
+          type: string
+          unique: true
+      collectionName: workspaces
+      info:
+        description: Default workspace containing registered applications
+        displayName: Workspace
+        pluralName: workspaces
+        singularName: workspace
+      kind: singleType
+      priority: 1
+  features:
+  - open-telemetry
+  - helm
+  frontend: none
+  frontend_protocol: rest
+  id_type: integer
+  orm: seaorm
+  project_edition: '2021'
+  project_name: modulaga-config-api
+  project_version: 0.1.0
+  protocols:
+  - grpc
+  row_level_security: false
+  security_level: standard
+  upx: true

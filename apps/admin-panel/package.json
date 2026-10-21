@@ -1,0 +1,13 @@
+{
+  "name": "@modulaga/admin-panel",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./NavigationStudio": "./src/NavigationStudio.tsx"
+  },
+  "dependencies": {
+    "@solidjs/web": "2.0.0-rc.11",
+    "solid-js": "2.0.0-rc.11"
+  }
+}

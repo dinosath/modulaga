@@ -1,0 +1,22 @@
+{
+  "name": "modulaga",
+  "private": true,
+  "packageManager": "pnpm@12.8.1",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "dev": "bash scripts/dev-local.sh",
+    "typecheck": "pnpm --filter @modulaga/shell typecheck && pnpm --filter @modulaga/contracts typecheck",
+    "test": "pnpm --filter @modulaga/shell test && pnpm --filter @modulaga/contracts test && cargo test --manifest-path services/workspace-config/Cargo.toml",
+    "test:coverage": "pnpm --filter @modulaga/shell test:coverage && cargo llvm-cov --manifest-path services/workspace-config/Cargo.toml --all-targets --ignore-filename-regex 'target|src/main.rs|src/bin/.*|postgres.rs' --fail-under-lines 90",
+    "build": "pnpm --filter @modulaga/shell build",
+    "workspace-config:dev": "cargo run --manifest-path services/workspace-config/Cargo.toml --bin workspace-config",
+    "workspace-config:test": "cargo test --manifest-path services/workspace-config/Cargo.toml",
+    "test:e2e": "pnpm --filter @modulaga/shell build && pnpm --filter @modulaga/demo-react build && playwright test --config playwright.spike.config.ts",
+    "test:spike": "pnpm test:e2e"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}

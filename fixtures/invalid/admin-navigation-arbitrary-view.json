@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "scope": { "type": "deployment" },
+  "registeredViews": [],
+  "sections": [
+    {
+      "id": "injected",
+      "type": "view",
+      "label": "Injected code",
+      "viewId": "unregistered",
+      "component": "https://untrusted.example.com/panel.js"
+    }
+  ]
+}

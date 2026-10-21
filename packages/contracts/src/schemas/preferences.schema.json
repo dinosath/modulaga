@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modulaga.dev/schemas/preferences.schema.json",
+  "title": "WorkspacePreferences",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "userId", "workspaceId", "overrides"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "userId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "workspaceId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "overrides": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "themeId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "density": { "enum": ["comfortable", "compact"] },
+        "menuMode": { "enum": ["tree", "rail", "horizontal", "drawer"] },
+        "menuPlacement": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["region", "renderer"],
+          "properties": {
+            "region": { "enum": ["top", "left", "right", "bottom"] },
+            "renderer": { "enum": ["tree", "rail", "horizontal", "drawer"] }
+          }
+        },
+        "layoutTemplate": {
+          "enum": ["single-column", "split-pane", "dashboard-grid"]
+        },
+        "hiddenMenuEntryIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        },
+        "menuOrder": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        },
+        "favorites": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        }
+      }
+    }
+  }
+}

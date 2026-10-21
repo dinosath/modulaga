@@ -1,0 +1,502 @@
+import { For, Show, createSignal } from "solid-js";
+import type { JSX } from "@solidjs/web";
+import type { NavigationEntry, NavigationGroup, NavigationLink, WorkspaceNavigation } from "../../shell/src/config/navigation";
+import { defaultNavigation, menuEntries, routePath, saveNavigation } from "../../shell/src/config/navigation";
+import { Badge } from "../../shell/src/components/ui/badge";
+import { Button } from "../../shell/src/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../shell/src/components/ui/card";
+import { Input } from "../../shell/src/components/ui/input";
+
+type Props = { config: () => WorkspaceNavigation; setConfig: (config: WorkspaceNavigation) => void; saveConfig: (config?: WorkspaceNavigation) => Promise<void> };
+
+function slug(value: string) {
+  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "new-item";
+}
+
+function safeExternalHref(href: string) {
+  return href.startsWith("https://") && href.length <= 2048;
+}
+
+export default function NavigationStudio(props: Props) {
+  const [activeTab, setActiveTab] = createSignal<"menu" | "settings" | "styles">("menu");
+  const [draggedEntryId, setDraggedEntryId] = createSignal<string>();
+  const [dropTarget, setDropTarget] = createSignal<{ id: string; position: "before" | "after" }>();
+  const [openGroupOptions, setOpenGroupOptions] = createSignal<string>();
+  const [moveTreeFor, setMoveTreeFor] = createSignal<string>();
+  const [addingEntryTo, setAddingEntryTo] = createSignal<string>();
+  const [newEntryRouteId, setNewEntryRouteId] = createSignal("");
+  const [newEntryLabel, setNewEntryLabel] = createSignal("");
+  const [notice, setNotice] = createSignal("Changes update the workspace menu as you edit.");
+
+  const entries = () => menuEntries(props.config());
+  function setEntries(next: NavigationEntry[]) {
+    const config = props.config();
+    props.setConfig({ ...config, menus: config.menus.map((menu, index) => index === 0 ? { ...menu, entries: next } : menu) });
+  }
+
+  function mapTree(items: NavigationEntry[], id: string, update: (entry: NavigationEntry) => NavigationEntry): NavigationEntry[] {
+    return items.map((entry) => {
+      if (entry.id === id) return update(entry);
+      return entry.type === "group" ? { ...entry, children: mapTree(entry.children, id, update) } : entry;
+    });
+  }
+
+  function updateEntry(id: string, update: (entry: NavigationEntry) => NavigationEntry) {
+    setEntries(mapTree(entries(), id, update));
+  }
+
+  function addGroup(parentId?: string) {
+    const name = `Group ${entries().filter((entry) => entry.type === "group").length + 1}`;
+    const group: NavigationGroup = { id: `${slug(name)}-${Date.now()}`, type: "group", label: name, icon: "grid", visible: true, chevron: true, defaultExpanded: true, children: [] };
+    if (parentId) updateEntry(parentId, (entry) => entry.type === "group" ? { ...entry, children: [...entry.children, group] } : entry);
+    else setEntries([...entries(), group]);
+  }
+
+  function beginAddEntry(groupId: string) {
+    setOpenGroupOptions(undefined);
+    setAddingEntryTo(groupId);
+    setNewEntryRouteId(props.config().routes[0]?.id ?? "");
+    setNewEntryLabel("");
+  }
+
+  function addConfiguredEntry(groupId: string, event: SubmitEvent) {
+    event.preventDefault();
+    const route = props.config().routes.find((candidate) => candidate.id === newEntryRouteId());
+    const label = newEntryLabel().trim();
+    if (!route || !label) return;
+    const entry: NavigationLink = {
+      id: `${slug(route.id)}-${Date.now()}`,
+      type: "route",
+      routeId: route.id,
+      label,
+      visible: true,
+    };
+    updateEntry(groupId, (group) => group.type === "group" ? { ...group, children: [...group.children, entry] } : group);
+    setAddingEntryTo(undefined);
+    setNewEntryLabel("");
+    setNotice(`${label} added to the menu group.`);
+  }
+
+  function moveEntryInTree(id: string, direction: -1 | 1) {
+    const reorder = (items: NavigationEntry[]): NavigationEntry[] => {
+      const index = items.findIndex((entry) => entry.id === id);
+      if (index >= 0) {
+        const destination = index + direction;
+        if (destination < 0 || destination >= items.length) return items;
+        const next = [...items];
+        [next[index], next[destination]] = [next[destination]!, next[index]!];
+        return next;
+      }
+      return items.map((entry) => entry.type === "group" ? { ...entry, children: reorder(entry.children) } : entry);
+    };
+    setEntries(reorder(entries()));
+  }
+
+  function containsEntry(entry: NavigationEntry, id: string): boolean {
+    if (entry.id === id) return true;
+    return entry.type === "group" && entry.children.some((child) => containsEntry(child, id));
+  }
+
+  function moveEntryTo(sourceId: string, targetGroupId?: string) {
+    const current = entries();
+    const findEntry = (items: NavigationEntry[]): NavigationEntry | undefined => {
+      for (const entry of items) {
+        if (entry.id === sourceId) return entry;
+        if (entry.type === "group") {
+          const nested = findEntry(entry.children);
+          if (nested) return nested;
+        }
+      }
+      return undefined;
+    };
+    const source = findEntry(current);
+    if (!source || (targetGroupId && (containsEntry(source, targetGroupId) || source.id === targetGroupId))) return;
+
+    const groupDepth = (items: NavigationEntry[], id: string, depth = 0): number | undefined => {
+      for (const entry of items) {
+        if (entry.id === id) return entry.type === "group" ? depth : undefined;
+        if (entry.type === "group") {
+          const nested = groupDepth(entry.children, id, depth + 1);
+          if (nested !== undefined) return nested;
+        }
+      }
+      return undefined;
+    };
+    if (source.type === "group" && targetGroupId && (groupDepth(current, targetGroupId) ?? 0) > 0) return;
+
+    const remove = (items: NavigationEntry[]): { entry?: NavigationEntry; entries: NavigationEntry[] } => {
+      const index = items.findIndex((entry) => entry.id === sourceId);
+      if (index >= 0) {
+        const next = [...items];
+        const [entry] = next.splice(index, 1);
+        return entry ? { entry, entries: next } : { entries: items };
+      }
+      for (let index = 0; index < items.length; index += 1) {
+        const item = items[index]!;
+        if (item.type !== "group") continue;
+        const result = remove(item.children);
+        if (result.entry) {
+          const next = [...items];
+          next[index] = { ...item, children: result.entries };
+          return { entry: result.entry, entries: next };
+        }
+      }
+      return { entries: items };
+    };
+
+    const removed = remove(current);
+    if (!removed.entry) return;
+    if (!targetGroupId) {
+      setEntries([...removed.entries, removed.entry]);
+    } else {
+      const insert = (items: NavigationEntry[]): NavigationEntry[] => items.map((entry) => {
+        if (entry.id === targetGroupId && entry.type === "group") return { ...entry, children: [...entry.children, removed.entry!] };
+        return entry.type === "group" ? { ...entry, children: insert(entry.children) } : entry;
+      });
+      setEntries(insert(removed.entries));
+    }
+    setOpenGroupOptions(undefined);
+    setMoveTreeFor(undefined);
+  }
+
+  function removeEntry(id: string) {
+    const removeTree = (items: NavigationEntry[]): NavigationEntry[] => items.filter((entry) => entry.id !== id).map((entry) => entry.type === "group" ? { ...entry, children: removeTree(entry.children) } : entry);
+    setEntries(removeTree(entries()));
+  }
+
+  function moveEntry(id: string, direction: -1 | 1) {
+    const next = [...entries()];
+    const index = next.findIndex((entry) => entry.id === id);
+    const destination = index + direction;
+    if (index < 0 || destination < 0 || destination >= next.length) return;
+    const from = next[index]!;
+    next[index] = next[destination]!;
+    next[destination] = from;
+    setEntries(next);
+  }
+
+  function moveNestedEntry(parentId: string, id: string, direction: -1 | 1) {
+    updateEntry(parentId, (parentEntry) => {
+      if (parentEntry.type !== "group") return parentEntry;
+      const children = [...parentEntry.children];
+      const index = children.findIndex((entry) => entry.id === id);
+      const destination = index + direction;
+      if (index < 0 || destination < 0 || destination >= children.length) return parentEntry;
+      [children[index], children[destination]] = [children[destination]!, children[index]!];
+      return { ...parentEntry, children };
+    });
+  }
+
+  function reorderEntry(sourceId: string, destinationId: string, position: "before" | "after") {
+    if (sourceId === destinationId) return;
+    const next = [...entries()];
+    const sourceIndex = next.findIndex((entry) => entry.id === sourceId);
+    if (sourceIndex < 0 || !next.some((entry) => entry.id === destinationId)) return;
+    const [moved] = next.splice(sourceIndex, 1);
+    const targetIndex = next.findIndex((entry) => entry.id === destinationId);
+    if (moved && targetIndex >= 0) next.splice(targetIndex + (position === "after" ? 1 : 0), 0, moved);
+    setEntries(next);
+  }
+
+  function toggleVisible(id: string) {
+    updateEntry(id, (entry) => ({ ...entry, visible: entry.visible === false }));
+  }
+
+  function updateSidebar(change: Partial<NonNullable<WorkspaceNavigation["shell"]>["sidebar"]>) {
+    const config = props.config();
+    const shell = config.shell ?? { sidebar: { width: 264, mode: "collapsible" as const, defaultCollapsed: false }, breadcrumbs: { enabled: true, maxDepth: 5, separator: "/" } };
+    props.setConfig({ ...config, shell: { ...shell, sidebar: { ...shell.sidebar, ...change } } });
+  }
+
+  function updateBreadcrumbs(change: Partial<NonNullable<WorkspaceNavigation["shell"]>["breadcrumbs"]>) {
+    const config = props.config();
+    const shell = config.shell ?? { sidebar: { width: 264, mode: "collapsible" as const, defaultCollapsed: false }, breadcrumbs: { enabled: true, maxDepth: 5, separator: "/" } };
+    props.setConfig({ ...config, shell: { ...shell, breadcrumbs: { ...shell.breadcrumbs, ...change } } });
+  }
+
+  function updateWelcomePage(change: Partial<NonNullable<WorkspaceNavigation["welcomePage"]>>) {
+    const config = props.config();
+    const welcomePage = config.welcomePage ?? {
+      enabled: true,
+      title: "Welcome to Modulaga",
+      description: "Your workspace, apps, and dashboards in one place.",
+      showDashboard: true,
+    };
+    props.setConfig({ ...config, welcomePage: { ...welcomePage, ...change } });
+  }
+
+  function updateMenuRegion(region: "left" | "top") {
+    const config = props.config();
+    const menuId = config.menus[0]?.id;
+    if (!menuId) return;
+    props.setConfig({
+      ...config,
+      menuPlacements: config.menuPlacements.map((placement) => placement.menuId === menuId ? { ...placement, region, renderer: region === "top" ? "horizontal" : "tree" } : placement),
+    });
+  }
+
+  function updateDashboardWidget(id: string, key: "label" | "value", value: string) {
+    const config = props.config();
+    const dashboards = (config.dashboards ?? []).map((dashboard, index) => index !== 0 ? dashboard : {
+      ...dashboard,
+      widgets: dashboard.widgets.map((widget) => widget.id === id ? { ...widget, settings: { ...widget.settings, value: { ...widget.settings.value, [key]: value } } } : widget),
+    });
+    props.setConfig({ ...config, dashboards });
+  }
+
+  function addDashboardWidget() {
+    const config = props.config();
+    const dashboard = config.dashboards?.[0];
+    const installation = config.installations[0];
+    if (!dashboard || !installation || !config.dashboards) {
+      setNotice("Add an application installation before adding a dashboard panel.");
+      return;
+    }
+    const widget = { id: `stat-card-${Date.now()}`, installationId: installation.id, componentId: "stat-card", settings: { schemaId: "modulaga-stat-card", value: { label: "New metric", value: "0" } } };
+    const dashboards = config.dashboards.map((item, index) => index === 0 ? { ...item, widgets: [...item.widgets, widget] } : item);
+    props.setConfig({ ...config, dashboards });
+    setNotice("Dashboard panel added to the workspace configuration.");
+  }
+
+  function removeDashboardWidget(id: string) {
+    const config = props.config();
+    if (!config.dashboards?.length) return;
+    const dashboards = config.dashboards.map((item, index) => index === 0 ? { ...item, widgets: item.widgets.filter((widget) => widget.id !== id) } : item);
+    props.setConfig({ ...config, dashboards });
+  }
+
+  async function save() {
+    const welcomePage = props.config().welcomePage;
+    if (welcomePage?.enabled && !welcomePage.title.trim()) {
+      setNotice("Add a title before saving the welcome page.");
+      return;
+    }
+    const validEntry = (entry: NavigationEntry): boolean => entry.type === "group"
+      ? entry.children.every(validEntry)
+      : entry.type === "route"
+        ? props.config().routes.some((route) => route.id === entry.routeId)
+        : entry.type === "external" ? safeExternalHref(entry.href) : entry.action === "admin-panel";
+    const valid = entries().every(validEntry);
+    if (!valid) {
+      setNotice("Fix invalid destinations before saving. Routes must come from an installed app and external links must use HTTPS.");
+      return;
+    }
+    try {
+      await props.saveConfig();
+      saveNavigation(props.config());
+      setNotice("Workspace configuration saved.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Workspace configuration could not be saved.");
+    }
+  }
+
+  async function reset() {
+    localStorage.removeItem("modulaga.workspace-navigation.v1");
+    props.setConfig(defaultNavigation);
+    try {
+      await props.saveConfig(defaultNavigation);
+      setNotice("Starter workspace configuration restored.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Starter configuration could not be saved.");
+    }
+  }
+
+  const destination = (entry: NavigationLink) => entry.type === "route" ? routePath(props.config(), entry.routeId) : entry.type === "external" ? entry.href : "Admin Panel action";
+
+  const selectClass = "h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+  const fieldClass = "grid gap-2 text-sm font-medium text-foreground";
+  const iconButtonClass = "inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40";
+  const iconNames = ["grid", "chart", "bag", "cart", "users", "truck", "box", "briefcase", "search", "bell", "monitor", "settings", "user"];
+
+  function renderAddEntryForm(group: NavigationGroup): JSX.Element {
+    return <Show when={addingEntryTo() === group.id}>
+      <form class="grid gap-3 border-t border-border bg-background p-3 sm:grid-cols-[1fr_1fr_auto_auto] sm:items-end" aria-label={`Add entry to ${group.label}`} onSubmit={(event) => addConfiguredEntry(group.id, event)}>
+        <label class={fieldClass}>Entry label<Input aria-label={`Entry label for ${group.label}`} value={newEntryLabel()} onInput={(event) => setNewEntryLabel(event.currentTarget.value)} placeholder="Menu label" required /></label>
+        <label class={fieldClass}>Application page<select class={selectClass} aria-label={`Application page for ${group.label}`} value={newEntryRouteId()} onChange={(event) => setNewEntryRouteId(event.currentTarget.value)} required>
+          <For each={props.config().routes}>{(route) => <option value={route.id}>{route.path}</option>}</For>
+        </select></label>
+        <Button type="submit" size="sm" disabled={props.config().routes.length === 0}>Add entry</Button>
+        <Button type="button" size="sm" variant="ghost" onClick={() => setAddingEntryTo(undefined)}>Cancel</Button>
+      </form>
+    </Show>;
+  }
+
+  function renderMoveTargetTree(items: NavigationEntry[], source: NavigationEntry, depth = 0): JSX.Element {
+    const groups = items.filter((entry): entry is NavigationGroup => entry.type === "group");
+    return <ul class={depth === 0 ? "grid gap-1" : "ml-3 grid gap-1 border-l border-border pl-2"}>
+      <For each={groups}>{(target) => <Show when={target.id !== source.id && !containsEntry(source, target.id) && (source.type !== "group" || depth === 0)}>
+        <li>
+          <button class="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70" type="button" aria-label={`Move ${source.label} to ${target.label}`} onClick={() => moveEntryTo(source.id, target.id)}>
+            <span class="min-w-0 flex-1 truncate">{target.label}</span><span aria-hidden="true">›</span>
+          </button>
+          {renderMoveTargetTree(target.children, source, depth + 1)}
+        </li>
+      </Show>}</For>
+    </ul>;
+  }
+
+  function renderGroupOptions(group: NavigationGroup, index: number, siblings: NavigationEntry[]): JSX.Element {
+    return <div class="relative">
+      <div class="flex items-center gap-1">
+        <Button type="button" variant="outline" size="sm" aria-label={`Add entry to ${group.label}`} onClick={() => beginAddEntry(group.id)}>＋ Add entry</Button>
+        <button class={iconButtonClass} type="button" aria-label={`More options for ${group.label}`} aria-expanded={openGroupOptions() === group.id ? "true" : "false"} title="More options" onClick={() => { setOpenGroupOptions((current) => current === group.id ? undefined : group.id); setMoveTreeFor(undefined); }}>⋯</button>
+      </div>
+      <Show when={openGroupOptions() === group.id}>
+        <div class="absolute right-0 top-full z-20 mt-1 grid w-52 gap-0.5 rounded-md border border-border bg-background p-1 text-foreground shadow-md" aria-label={`${group.label} options`}>
+          <button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70 disabled:opacity-40" type="button" aria-label={`Move ${group.label} up`} disabled={index === 0} onClick={() => { moveEntryInTree(group.id, -1); setOpenGroupOptions(undefined); }}><span class="w-4 text-center text-muted-foreground">↑</span>Move up</button>
+          <button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70 disabled:opacity-40" type="button" aria-label={`Move ${group.label} down`} disabled={index === siblings.length - 1} onClick={() => { moveEntryInTree(group.id, 1); setOpenGroupOptions(undefined); }}><span class="w-4 text-center text-muted-foreground">↓</span>Move down</button>
+          <button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70" type="button" aria-expanded={moveTreeFor() === group.id ? "true" : "false"} onClick={() => setMoveTreeFor((current) => current === group.id ? undefined : group.id)}><span class="w-4 text-center text-muted-foreground">↪</span><span class="flex-1">Move to</span><span aria-hidden="true" class="text-muted-foreground">›</span></button>
+          <Show when={moveTreeFor() === group.id}>
+            <div class="my-1 grid max-h-48 gap-0.5 overflow-y-auto border-y border-border py-1" aria-label={`Move ${group.label} to menu group`}>
+              <button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70" type="button" onClick={() => moveEntryTo(group.id)}>Workspace menu</button>
+              {renderMoveTargetTree(entries(), group)}
+            </div>
+          </Show>
+          <div class="my-1 border-t border-border" />
+          <button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-destructive hover:bg-accent/70" type="button" onClick={() => { removeEntry(group.id); setOpenGroupOptions(undefined); }}><span class="w-4 text-center">×</span>Delete group</button>
+        </div>
+      </Show>
+    </div>;
+  }
+
+  function renderNestedEntry(entry: NavigationEntry, parentId: string, index: number, siblings: NavigationEntry[]): JSX.Element {
+    return <div class="rounded-md border border-border bg-background p-2">
+      <div class="flex flex-wrap items-center gap-2">
+        <Badge variant="outline" class="shrink-0">{entry.type === "group" ? "Group" : entry.type === "route" ? "Page" : entry.type === "external" ? "Link" : "Action"}</Badge>
+        <Input aria-label={`${entry.label} label`} class="h-8 min-w-32 flex-1" value={entry.label} onInput={(event) => updateEntry(entry.id, (current) => ({ ...current, label: event.currentTarget.value }))} />
+        <select class={selectClass + " w-32"} aria-label={`${entry.label} icon`} value={entry.icon ?? "grid"} onChange={(event) => updateEntry(entry.id, (current) => ({ ...current, icon: event.currentTarget.value }))}><For each={iconNames}>{(icon) => <option value={icon}>{icon}</option>}</For></select>
+        <span class="hidden max-w-44 truncate text-xs text-muted-foreground md:block">{entry.type === "group" ? `${entry.children.length} items` : destination(entry)}</span>
+        <Show when={entry.type !== "group"}><button class={iconButtonClass} aria-label={`Move ${entry.label} up`} title={`Move ${entry.label} up`} disabled={index === 0} onClick={() => moveNestedEntry(parentId, entry.id, -1)}>↑</button><button class={iconButtonClass} aria-label={`Move ${entry.label} down`} title={`Move ${entry.label} down`} disabled={index === siblings.length - 1} onClick={() => moveNestedEntry(parentId, entry.id, 1)}>↓</button></Show>
+        <button class={iconButtonClass} aria-label="Toggle visibility" aria-pressed={entry.visible !== false ? "true" : "false"} onClick={() => updateEntry(entry.id, (current) => ({ ...current, visible: current.visible === false }))}>{entry.visible === false ? "○" : "◉"}</button>
+        <Show when={entry.type === "group"}><label class="flex items-center gap-1 text-xs text-muted-foreground"><input aria-label={`${entry.label} show chevron`} type="checkbox" checked={(entry as NavigationGroup).chevron === true} onChange={(event) => updateEntry(entry.id, (current) => current.type === "group" ? { ...current, chevron: event.currentTarget.checked } : current)} />Chevron</label><label class="flex items-center gap-1 text-xs text-muted-foreground"><input aria-label={`${entry.label} expanded by default`} type="checkbox" checked={(entry as NavigationGroup).defaultExpanded !== false} onChange={(event) => updateEntry(entry.id, (current) => current.type === "group" ? { ...current, defaultExpanded: event.currentTarget.checked } : current)} />Expanded</label>{renderGroupOptions(entry as NavigationGroup, index, siblings)}</Show>
+        <Show when={entry.type !== "group"}><button class={`${iconButtonClass} text-destructive`} aria-label={`Remove ${entry.label}`} onClick={() => removeEntry(entry.id)}>×</button></Show>
+      </div>
+      <Show when={entry.type === "group"}>
+        <div class="mt-2 flex flex-col gap-2 border-l border-border pl-3">
+          <For each={(entry as NavigationGroup).children}>{(child, childIndex) => renderNestedEntry(child, entry.id, childIndex(), (entry as NavigationGroup).children)}</For>
+          <Show when={(entry as NavigationGroup).children.length === 0}><p class="py-1 text-xs text-muted-foreground">No items in this group.</p></Show>
+        </div>
+        {renderAddEntryForm(entry as NavigationGroup)}
+      </Show>
+    </div>;
+  }
+
+  return (
+    <div class="min-h-full space-y-6 text-foreground">
+      <header class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div class="space-y-2">
+          <p class="text-sm text-muted-foreground">Workspace / Administration</p>
+          <h1 class="text-3xl font-semibold tracking-tight">Admin Menu Settings</h1>
+          <p class="max-w-2xl text-sm text-muted-foreground">Configure the menu for {props.config().workspace.name}.</p>
+        </div>
+        <div class="flex gap-2"><Button variant="ghost" type="button" onClick={reset}>Reset</Button><Button type="button" onClick={save}>Save changes</Button></div>
+      </header>
+
+      <div class="flex gap-1 border-b border-border" role="tablist" aria-label="Admin menu settings">
+        <button class={`border-b-2 px-4 py-3 text-sm font-medium ${activeTab() === "menu" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`} id="admin-menu-tab" role="tab" aria-selected={activeTab() === "menu" ? "true" : "false"} aria-controls="admin-menu-panel" onClick={() => { setActiveTab("menu"); }}>Menu Editor</button>
+        <button class={`border-b-2 px-4 py-3 text-sm font-medium ${activeTab() === "settings" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`} id="admin-settings-tab" role="tab" aria-selected={activeTab() === "settings" ? "true" : "false"} aria-controls="admin-settings-panel" onClick={() => { setActiveTab("settings"); }}>Settings</button>
+        <button class={`border-b-2 px-4 py-3 text-sm font-medium ${activeTab() === "styles" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`} id="admin-styles-tab" role="tab" aria-selected={activeTab() === "styles" ? "true" : "false"} aria-controls="admin-styles-panel" onClick={() => { setActiveTab("styles"); }}>Styles</button>
+      </div>
+
+      <div class="grid items-start gap-5">
+        <Card aria-label="Navigation configuration">
+          <div id={activeTab() === "menu" ? "admin-menu-panel" : activeTab() === "settings" ? "admin-settings-panel" : "admin-styles-panel"} role="tabpanel" aria-labelledby={activeTab() === "menu" ? "admin-menu-tab" : activeTab() === "settings" ? "admin-settings-tab" : "admin-styles-tab"}>
+          <CardHeader class="flex-row items-start justify-between gap-4">
+            <div class="space-y-1"><CardTitle>{activeTab() === "menu" ? "Menu structure" : activeTab() === "settings" ? "Workspace settings" : "Menu styles"}</CardTitle><CardDescription>{activeTab() === "menu" ? "Drag items to reorder application pages and menu links." : activeTab() === "settings" ? "Configure the shell layout and welcome page." : "Choose the visual theme used by the workspace shell."}</CardDescription></div>
+            <Show when={activeTab() === "menu"}><Button variant="outline" size="sm" type="button" onClick={() => addGroup()}>Add group</Button></Show>
+          </CardHeader>
+          <CardContent class="space-y-6">
+            <Show when={activeTab() === "menu"}>
+            <div class="space-y-2">
+              <For each={entries()}>{(entry, index) => <div class={`menu-editor-item rounded-lg border border-border ${draggedEntryId() === entry.id ? "opacity-50" : ""} ${dropTarget()?.id === entry.id ? dropTarget()?.position === "before" ? "border-t-2 border-t-primary" : "border-b-2 border-b-primary" : ""}`} onDragOver={(event) => { event.preventDefault(); const transfer = event.dataTransfer; if (transfer && draggedEntryId() !== entry.id) { transfer.dropEffect = "move"; const bounds = event.currentTarget.getBoundingClientRect(); setDropTarget({ id: entry.id, position: event.clientY >= bounds.top + bounds.height / 2 ? "after" : "before" }); } }} onDrop={(event) => { event.preventDefault(); const transfer = event.dataTransfer; const sourceId = transfer?.getData("text/plain") || draggedEntryId(); const bounds = event.currentTarget.getBoundingClientRect(); const position = event.clientY >= bounds.top + bounds.height / 2 ? "after" : "before"; if (sourceId) reorderEntry(sourceId, entry.id, position); setDraggedEntryId(undefined); setDropTarget(undefined); }}>
+                <div class="flex min-h-16 items-center gap-3 p-3">
+                  <span class="cursor-grab select-none touch-none px-1 text-lg text-muted-foreground active:cursor-grabbing" aria-label="Drag to reorder" title="Drag to reorder" draggable="true" onDragStart={(event) => { setDraggedEntryId(entry.id); setDropTarget(undefined); if (event.dataTransfer) { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", entry.id); } }} onDragEnd={() => { setDraggedEntryId(undefined); setDropTarget(undefined); }}>⠿</span>
+                  <Badge variant="outline" class="shrink-0">{entry.type === "group" ? "Group" : entry.type === "route" ? "Page" : entry.type === "external" ? "Link" : "Action"}</Badge>
+                  <div class="grid min-w-0 flex-1 gap-1">
+                    <Input aria-label={`${entry.type === "group" ? "Group" : "Link"} label`} class="h-8 border-0 px-1 font-medium shadow-none focus-visible:ring-0" value={entry.label}
+                      onInput={(event) => updateEntry(entry.id, (current) => ({ ...current, label: event.currentTarget.value }))} />
+                    <span class="truncate px-1 text-xs text-muted-foreground">{entry.type === "group" ? `${entry.children.length} links` : destination(entry)}</span>
+                  </div>
+                  <select class={selectClass + " w-32"} aria-label={`${entry.label} icon`} value={entry.icon ?? "grid"} onChange={(event) => updateEntry(entry.id, (current) => ({ ...current, icon: event.currentTarget.value }))}><For each={iconNames}>{(icon) => <option value={icon}>{icon}</option>}</For></select>
+                  <div class="flex shrink-0">
+                    <Show when={entry.type !== "group"}><button class={iconButtonClass} aria-label={`Move ${entry.label} up`} title={`Move ${entry.label} up`} disabled={index() === 0} onClick={() => moveEntry(entry.id, -1)}>↑</button><button class={iconButtonClass} aria-label={`Move ${entry.label} down`} title={`Move ${entry.label} down`} disabled={index() === entries().length - 1} onClick={() => moveEntry(entry.id, 1)}>↓</button></Show>
+                    <button class={iconButtonClass} aria-label="Toggle link visibility" title="Toggle visibility" aria-pressed={entry.visible !== false ? "true" : "false"} onClick={() => toggleVisible(entry.id)}>{entry.visible === false ? "○" : "◉"}</button>
+                    <Show when={entry.type === "group"}><label class="flex items-center gap-1 text-xs text-muted-foreground"><input aria-label={`${entry.label} show chevron`} type="checkbox" checked={(entry as NavigationGroup).chevron === true} onChange={(event) => updateEntry(entry.id, (current) => current.type === "group" ? { ...current, chevron: event.currentTarget.checked } : current)} />Chevron</label><label class="flex items-center gap-1 text-xs text-muted-foreground"><input aria-label={`${entry.label} expanded by default`} type="checkbox" checked={(entry as NavigationGroup).defaultExpanded !== false} onChange={(event) => updateEntry(entry.id, (current) => current.type === "group" ? { ...current, defaultExpanded: event.currentTarget.checked } : current)} />Expanded</label><Button variant="outline" size="sm" type="button" aria-label="Add submenu" onClick={() => addGroup(entry.id)}>Add submenu</Button>{renderGroupOptions(entry as NavigationGroup, index(), entries())}</Show>
+                    <Show when={entry.type !== "group"}><button class={`${iconButtonClass} text-destructive`} aria-label={`Remove ${entry.label}`} title="Remove" onClick={() => removeEntry(entry.id)}>×</button></Show>
+                  </div>
+                </div>
+                <Show when={entry.type === "group"}><div class="flex flex-col gap-2 border-t border-border bg-muted/40 p-3 pl-6">
+                  <For each={(entry as NavigationGroup).children}>{(child, childIndex) => renderNestedEntry(child, entry.id, childIndex(), (entry as NavigationGroup).children)}</For>
+                  <Show when={(entry as NavigationGroup).children.length === 0}><p class="text-xs text-muted-foreground">No links in this group.</p></Show>
+                  {renderAddEntryForm(entry as NavigationGroup)}
+                </div></Show>
+              </div>}</For>
+              <Show when={entries().length === 0}><p class="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">No menu items yet. Add a group to get started.</p></Show>
+            </div>
+
+            </Show>
+
+            <Show when={activeTab() === "settings"}>
+            <section class="space-y-4" aria-label="Shell settings">
+              <div class="space-y-1"><h2 class="font-semibold">Shell settings</h2><p class="text-sm text-muted-foreground">These values control the running workspace shell.</p></div>
+              <div class="grid gap-4 sm:grid-cols-2">
+                <label class={fieldClass}>Sidebar width <span class="text-muted-foreground">{props.config().shell?.sidebar.width ?? 264}px</span>
+                  <input aria-label="Sidebar width" class="w-full accent-primary" type="range" min="200" max="360" step="4" value={props.config().shell?.sidebar.width ?? 264} onInput={(event) => updateSidebar({ width: Number(event.currentTarget.value) })} />
+                </label>
+                <label class={fieldClass}>Sidebar mode<select class={selectClass} aria-label="Sidebar mode" value={props.config().shell?.sidebar.mode ?? "collapsible"} onChange={(event) => updateSidebar({ mode: event.currentTarget.value as "fixed" | "collapsible" })}><option value="collapsible">Collapsible</option><option value="fixed">Fixed</option></select></label>
+                <label class={fieldClass}>Menu placement<select class={selectClass} aria-label="Menu placement" value={props.config().menuPlacements[0]?.region === "top" ? "top" : "left"} onChange={(event) => updateMenuRegion(event.currentTarget.value as "left" | "top")}><option value="left">Sidebar</option><option value="top">Top bar</option></select></label>
+                <label class="flex items-center gap-2 text-sm"><input type="checkbox" checked={props.config().shell?.sidebar.defaultCollapsed ?? false} onChange={(event) => updateSidebar({ defaultCollapsed: event.currentTarget.checked })} /> Start with the sidebar collapsed</label>
+                <label class="flex items-center gap-2 text-sm"><input type="checkbox" checked={props.config().shell?.breadcrumbs.enabled ?? true} onChange={(event) => updateBreadcrumbs({ enabled: event.currentTarget.checked })} /> Show breadcrumbs</label>
+                <label class={fieldClass}>Breadcrumb depth<Input aria-label="Breadcrumb depth" type="number" min="1" max="8" value={props.config().shell?.breadcrumbs.maxDepth ?? 5} onInput={(event) => updateBreadcrumbs({ maxDepth: Number(event.currentTarget.value) })} /></label>
+              </div>
+            </section>
+
+            <section class="space-y-4 border-t border-border pt-5" aria-label="Welcome page settings">
+              <div class="space-y-1"><h2 class="font-semibold">Welcome page</h2><p class="text-sm text-muted-foreground">Configure the workspace landing page shown at the root URL.</p></div>
+              <div class="grid gap-4 sm:grid-cols-2">
+                <label class={fieldClass}>Page title<Input aria-label="Welcome page title" maxlength={120} value={props.config().welcomePage?.title ?? "Welcome to Modulaga"} onInput={(event) => updateWelcomePage({ title: event.currentTarget.value })} /></label>
+                <label class={fieldClass}>Description<textarea aria-label="Welcome page description" class="min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" maxlength={500} value={props.config().welcomePage?.description ?? "Your workspace, apps, and dashboards in one place."} onInput={(event) => updateWelcomePage({ description: event.currentTarget.value })} /></label>
+                <label class="flex items-center gap-2 text-sm"><input aria-label="Enable welcome page" type="checkbox" checked={props.config().welcomePage?.enabled ?? true} onChange={(event) => updateWelcomePage({ enabled: event.currentTarget.checked })} /> Show welcome heading</label>
+                <label class="flex items-center gap-2 text-sm"><input aria-label="Show dashboard on welcome page" type="checkbox" checked={props.config().welcomePage?.showDashboard ?? true} onChange={(event) => updateWelcomePage({ showDashboard: event.currentTarget.checked })} /> Show dashboard panels</label>
+              </div>
+            </section>
+
+            <section class="space-y-4 border-t border-border pt-5" aria-label="Dashboard settings">
+              <div class="flex items-start justify-between gap-3"><div class="space-y-1"><h2 class="font-semibold">Dashboard</h2><p class="text-sm text-muted-foreground">Configure the starter dashboard and panels.</p></div><Button variant="outline" size="sm" type="button" onClick={addDashboardWidget}>Add stat card</Button></div>
+              <div class="grid gap-4 sm:grid-cols-2">
+                <label class={fieldClass}>Dashboard title<Input aria-label="Dashboard title" value={props.config().dashboards?.[0]?.title ?? "Workspace overview"} onInput={(event) => { const config = props.config(); const dashboards = [...(config.dashboards ?? [])]; if (dashboards[0]) dashboards[0] = { ...dashboards[0], title: event.currentTarget.value }; props.setConfig({ ...config, dashboards }); }} /></label>
+                <label class={fieldClass}>Grid columns<Input aria-label="Grid columns" type="number" min="1" max="12" value={props.config().dashboards?.[0]?.columns ?? 3} onInput={(event) => { const config = props.config(); const dashboards = [...(config.dashboards ?? [])]; if (dashboards[0]) dashboards[0] = { ...dashboards[0], columns: Math.min(12, Math.max(1, Number(event.currentTarget.value))) }; props.setConfig({ ...config, dashboards }); }} /></label>
+              </div>
+              <div class="space-y-2">
+                <For each={props.config().dashboards?.[0]?.widgets ?? []}>{(widget) => <div class="grid items-end gap-3 rounded-lg border border-border p-3 sm:grid-cols-[1fr_1fr_auto]">
+                  <label class={fieldClass}>Panel label<Input aria-label="Panel label" value={String(widget.settings.value.label ?? "")} onInput={(event) => updateDashboardWidget(widget.id, "label", event.currentTarget.value)} /></label>
+                  <label class={fieldClass}>Panel value<Input aria-label="Panel value" value={String(widget.settings.value.value ?? "")} onInput={(event) => updateDashboardWidget(widget.id, "value", event.currentTarget.value)} /></label>
+                  <Button variant="ghost" size="icon" type="button" aria-label={`Remove panel ${String(widget.settings.value.label ?? widget.id)}`} onClick={() => removeDashboardWidget(widget.id)}>×</Button>
+                </div>}</For>
+                <Show when={(props.config().dashboards?.[0]?.widgets.length ?? 0) === 0}><p class="text-sm text-muted-foreground">No panels placed on this dashboard yet.</p></Show>
+              </div>
+            </section>
+
+            </Show>
+
+            <Show when={activeTab() === "styles"}>
+              <section class="space-y-4" aria-label="Menu styles settings">
+                <div class="space-y-1"><h2 class="font-semibold">Workspace theme</h2><p class="text-sm text-muted-foreground">Choose the theme reference applied to the shell.</p></div>
+                <div class="grid gap-4 sm:grid-cols-2">
+                  <label class={fieldClass}>Theme ID<Input aria-label="Theme ID" value={props.config().theme?.id ?? "modulaga-default"} onInput={(event) => { const config = props.config(); props.setConfig({ ...config, theme: { id: event.currentTarget.value, version: config.theme?.version ?? "1.0.0" } }); }} /></label>
+                  <label class={fieldClass}>Theme version<Input aria-label="Theme version" value={props.config().theme?.version ?? "1.0.0"} onInput={(event) => { const config = props.config(); props.setConfig({ ...config, theme: { id: config.theme?.id ?? "modulaga-default", version: event.currentTarget.value } }); }} /></label>
+                </div>
+              </section>
+            </Show>
+
+            <Show when={activeTab() === "menu"}>
+            <p class="min-h-5 text-sm text-muted-foreground" role="status">{notice()}</p>
+            </Show>
+          </CardContent>
+          </div>
+        </Card>
+
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,24 @@
+{
+  "name": "@modulaga/demo-react",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5174",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4174 --strictPort"
+  },
+  "dependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@module-federation/vite": "1.23.0",
+    "@types/node": "24.10.9",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "typescript": "5.9.3",
+    "vite": "8.3.1"
+  }
+}

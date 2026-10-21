@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "apps": [
+    {
+      "id": "orders",
+      "name": "Orders",
+      "publisher": { "id": "modulaga-demo", "name": "Modulaga Demo" },
+      "description": "Local example microfrontend.",
+      "tags": ["operations", "demo"],
+      "releases": [
+        {
+          "id": "orders@1.2.0",
+          "version": "1.2.0",
+          "publishedAt": "2026-09-01T12:00:00Z",
+          "manifestUrl": "http://127.0.0.1:4174/mf-manifest.json",
+          "remoteName": "demo_react",
+          "exposedModule": "./mount",
+          "requiredCapabilities": ["workspace:read"],
+          "compatibility": {
+            "lifecycleContractVersion": "1.0.0",
+            "minimumShellVersion": "0.1.0",
+            "federationFormat": "module-federation",
+            "remoteType": "module",
+            "designSystemVersion": "1.0.0"
+          }
+        }
+      ]
+    }
+  ]
+}

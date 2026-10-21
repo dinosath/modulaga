@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modulaga.dev/schemas/catalog.schema.json",
+  "title": "Catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "apps"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "apps": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/App" }
+    }
+  },
+  "$defs": {
+    "Identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "Publisher": {
+      "title": "CatalogPublisher",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "homepage": { "type": "string", "format": "uri" }
+      }
+    },
+    "App": {
+      "title": "CatalogApp",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "publisher", "description", "tags", "releases"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "publisher": { "$ref": "#/$defs/Publisher" },
+        "description": { "type": "string", "maxLength": 2000 },
+        "iconUrl": { "type": "string", "format": "uri" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 40 }
+        },
+        "releases": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/Release" }
+        }
+      }
+    },
+    "Release": {
+      "title": "CatalogRelease",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version",
+        "manifestUrl",
+        "remoteName",
+        "exposedModule",
+        "integrity",
+        "requiredCapabilities",
+        "compatibility"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 160,
+          "pattern": "^[a-z0-9][a-z0-9._-]*@[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+        },
+        "version": { "$ref": "#/$defs/Semver" },
+        "publishedAt": { "type": "string", "format": "date-time" },
+        "manifestUrl": { "type": "string", "format": "uri" },
+        "remoteName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "exposedModule": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128,
+          "pattern": "^\\./[A-Za-z0-9_./-]+$"
+        },
+        "integrity": {
+          "type": "string",
+          "pattern": "^sha(256|384|512)-[A-Za-z0-9+/]+={0,2}$"
+        },
+        "requiredCapabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 80 }
+        },
+        "compatibility": { "$ref": "#/$defs/Compatibility" }
+      }
+    },
+    "Compatibility": {
+      "title": "ReleaseCompatibility",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lifecycleContractVersion",
+        "minimumShellVersion",
+        "federationFormat",
+        "remoteType",
+        "designSystemVersion"
+      ],
+      "properties": {
+        "lifecycleContractVersion": { "$ref": "#/$defs/Semver" },
+        "minimumShellVersion": { "$ref": "#/$defs/Semver" },
+        "federationFormat": { "const": "module-federation" },
+        "remoteType": { "enum": ["module"] },
+        "designSystemVersion": { "$ref": "#/$defs/Semver" }
+      }
+    },
+    "Semver": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    }
+  }
+}

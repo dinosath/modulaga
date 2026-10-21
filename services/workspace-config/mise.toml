@@ -1,0 +1,128 @@
+min_version = "2024.1.0"
+
+[tools]
+rust = "latest"
+"github:aliev/baker" = "latest"
+"cargo:cargo-chef" = "latest"
+"cargo:cargo-deny" = "latest"
+"cargo:cargo-nextest" = "latest"
+protoc = "latest"
+helm = "latest"
+
+
+jq = "latest"
+
+[tasks.generate-local]
+description = "Generate the project files from local repo"
+run = "baker generate ../saas-templates . --answers-file .baker/answers.json --force --non-interactive --skip-confirms all"
+sources = ['.baker/answers.json']
+
+[tasks.generate]
+description = "Generate the project files"
+run = "baker generate https://github.com/dinosath/saas-templates . --answers-file .baker/answers.json --force --non-interactive --skip-confirms all"
+sources = ['.baker/answers.json']
+
+[tasks.baker-update]
+description = "Update the project files from generated repo"
+run = "baker update --non-interactive --skip-confirms all"
+sources = ['.baker/answers.json']
+
+
+
+[tasks.build]
+description = "Build the project"
+run = "cargo build --release"
+
+
+[tasks.test]
+description = "Run tests"
+run = "cargo nextest run --all --test-threads 4 --no-tests=pass"
+
+[tasks.test-coverage]
+description = "Run tests for coverage report"
+run = "cargo tarpaulin --out Html --out Lcov --output-dir target/coverage"
+
+[tasks.audit]
+description = "Check for vulnerabilities using cargo deny"
+run = "cargo deny check"
+
+[tasks.cargo-chef]
+description = "Run cargo chef to cache dependencies"
+run = "cargo chef prepare --recipe-path recipe.json"
+
+[tasks.docker-build]
+description = "Build Docker images"
+run = "docker build -t modulaga-config-api ."
+
+
+[tasks.docker-push]
+description = "Push Docker images"
+run = "docker push -t modulaga-config-api ."
+depends = ["docker-build"]
+
+[tasks.e2e]
+description = "Run e2e tests"
+sources = ['Cargo.toml', 'src/**/*.rs'] 
+run = "cargo nextest run"
+dir = "e2e"
+depends = ["docker-build"]
+
+[tasks.helm-package]
+description = "Package Helm chart"
+dir="helm"
+run = "helm package ."
+
+[tasks.helm-push]
+description = "Push Helm chart"
+dir="helm"
+run = "helm push modulaga-config-api"
+depends = ["helm-package"]
+
+
+[tasks.post-generate]
+description = "Post generation tasks"
+run = '''
+rustup component add rustfmt
+cargo fmt 
+cargo fix --allow-dirty --allow-no-vcs
+cargo update
+'''
+
+[tasks.build-and-test]
+description = "Build and test the project"
+run = [
+    { task = "post-generate" },
+    { task = "cargo-chef" },
+    { tasks = ["test","audit"] },
+    { task = "docker-build" },
+    { task = "e2e" },
+    { task = "helm-package" },
+]
+
+[tasks.build-frontend-and-test]
+description = "Build frontend and test the project"
+run = [
+    
+    { task = "post-generate" },
+    { task = "cargo-chef" },
+    { tasks = ["test","audit"] },
+    { task = "docker-build" },
+    { task = "e2e" },
+    { task = "helm-package" },
+]
+
+[tasks.generate-local-and-test]
+description = "Generate the project and run tests"
+depends = ["generate-local", "build-and-test"]
+
+[tasks.generate-and-test]
+description = "Generate the project and run tests"
+depends = ["generate", "build-and-test"]
+
+[tasks.ci]
+description = "CI Task"
+run = [
+    
+    { task = "docker-build" },
+    { tasks = ["docker-push","helm-push"] },
+]

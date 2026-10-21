@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "workspace": { "id": "default", "name": "Default workspace" },
+  "installations": [
+    {
+      "id": "orders-installation",
+      "appId": "orders",
+      "releaseId": "orders@1.2.0",
+      "basePath": "//orders",
+      "settings": {}
+    }
+  ],
+  "routes": [],
+  "menus": [],
+  "menuPlacements": [],
+  "layout": { "template": "single-column", "regions": [] }
+}

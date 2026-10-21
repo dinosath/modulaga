@@ -1,0 +1,29 @@
+[package]
+name = "workspace-config"
+version = "0.2.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]
+async-trait = "0.1"
+axum = { version = "0.8", features = ["macros"] }
+buffa = "0.9"
+connectrpc = { version = "0.9", features = ["axum"] }
+jsonwebtoken = { version = "11", features = ["rust_crypto"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "sqlite", "json", "uuid"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "set-header"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[build-dependencies]
+connectrpc-build = "0.9"
+
+[dev-dependencies]
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }

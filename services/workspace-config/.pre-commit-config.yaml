@@ -1,0 +1,8 @@
+repos:
+  - repo: local
+    hooks:
+      - id: update-submodules
+        name: Update submodules
+        entry: bash .githooks/pre-commit
+        language: system
+        always_run: true

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "workspace": { "id": "default", "name": "Default workspace" },
+  "installations": [],
+  "routes": [],
+  "menus": [
+    {
+      "id": "primary",
+      "name": "Primary navigation",
+      "entries": [
+        {
+          "id": "unsafe-link",
+          "type": "external",
+          "label": "Unsafe",
+          "href": "javascript:alert(1)"
+        }
+      ]
+    }
+  ],
+  "menuPlacements": [],
+  "layout": { "template": "single-column", "regions": [] }
+}

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "apps": [
+    {
+      "id": "orders",
+      "name": "Orders",
+      "publisher": { "id": "demo", "name": "Demo" },
+      "description": "Invalid release fixture.",
+      "tags": [],
+      "releases": [
+        {
+          "id": "orders@1.0.0",
+          "version": "1.0.0",
+          "manifestUrl": "https://apps.example.com/orders/mf-manifest.json",
+          "remoteName": "orders_remote",
+          "exposedModule": "./mount",
+          "compatibility": {
+            "lifecycleContractVersion": "1.0.0",
+            "minimumShellVersion": "0.1.0",
+            "federationFormat": "module-federation",
+            "remoteType": "module",
+            "designSystemVersion": "1.0.0"
+          }
+        }
+      ]
+    }
+  ]
+}

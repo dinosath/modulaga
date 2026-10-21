@@ -1,0 +1,320 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modulaga.dev/schemas/workspace.schema.json",
+  "title": "WorkspaceConfiguration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "workspace", "installations", "routes", "menus", "menuPlacements", "layout"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "workspace": { "$ref": "#/$defs/WorkspaceIdentity" },
+    "welcomePage": { "$ref": "#/$defs/WelcomePageSettings" },
+    "installations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Installation" }
+    },
+    "routes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Route" }
+    },
+    "menus": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Menu" }
+    },
+    "menuPlacements": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/MenuPlacement" }
+    },
+    "layout": { "$ref": "#/$defs/Layout" },
+    "shell": { "$ref": "#/$defs/ShellSettings" },
+    "dashboards": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Dashboard" }
+    },
+    "theme": { "$ref": "#/$defs/ThemeReference" }
+  },
+  "$defs": {
+    "Identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+    },
+    "WorkspaceIdentity": {
+      "title": "WorkspaceIdentity",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 }
+      }
+    },
+    "WelcomePageSettings": {
+      "title": "WelcomePageSettings",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "title", "description", "showDashboard"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 500 },
+        "showDashboard": { "type": "boolean" }
+      }
+    },
+    "SchemaValidatedSettings": {
+      "title": "SchemaValidatedSettings",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaId", "value"],
+      "properties": {
+        "schemaId": { "$ref": "#/$defs/Identifier" },
+        "value": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "Installation": {
+      "title": "WorkspaceInstallation",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "appId", "releaseId", "basePath", "settings"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "appId": { "$ref": "#/$defs/Identifier" },
+        "releaseId": { "type": "string", "minLength": 3, "maxLength": 160 },
+        "basePath": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 256,
+          "pattern": "^/[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*$"
+        },
+        "settings": { "$ref": "#/$defs/SchemaValidatedSettings" }
+      }
+    },
+    "Route": {
+      "title": "WorkspaceRoute",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "installationId", "path"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "installationId": { "$ref": "#/$defs/Identifier" },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^/[A-Za-z0-9_:/{}.-]*$"
+        }
+      }
+    },
+    "Menu": {
+      "title": "MenuDefinition",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "entries"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "entries": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/MenuEntry" }
+        }
+      }
+    },
+    "MenuEntry": {
+      "title": "MenuEntry",
+      "oneOf": [
+        { "$ref": "#/$defs/MenuGroup" },
+        { "$ref": "#/$defs/InternalMenuEntry" },
+        { "$ref": "#/$defs/ExternalMenuEntry" },
+        { "$ref": "#/$defs/ActionMenuEntry" }
+      ]
+    },
+    "MenuGroup": {
+      "title": "MenuGroup",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "label", "children"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "type": { "const": "group" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "icon": { "type": "string", "maxLength": 80 },
+        "visible": { "type": "boolean" },
+        "chevron": { "type": "boolean" },
+        "defaultExpanded": { "type": "boolean" },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/MenuEntry" }
+        }
+      }
+    },
+    "InternalMenuEntry": {
+      "title": "InternalMenuEntry",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "label", "routeId"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "type": { "const": "route" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "icon": { "type": "string", "maxLength": 80 },
+        "routeId": { "$ref": "#/$defs/Identifier" },
+        "visible": { "type": "boolean" }
+      }
+    },
+    "ExternalMenuEntry": {
+      "title": "ExternalMenuEntry",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "label", "href"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "type": { "const": "external" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "icon": { "type": "string", "maxLength": 80 },
+        "href": {
+          "type": "string",
+          "format": "uri-reference",
+          "pattern": "^(?:https://|/(?!/)|#)",
+          "maxLength": 2048
+        },
+        "visible": { "type": "boolean" }
+      }
+    },
+    "ActionMenuEntry": {
+      "title": "ActionMenuEntry",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "label", "action", "path"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "type": { "const": "action" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "icon": { "type": "string", "maxLength": 80 },
+        "visible": { "type": "boolean" },
+        "action": { "enum": ["admin-panel"] },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^/[A-Za-z0-9_:/{}.-]*$"
+        }
+      }
+    },
+    "MenuPlacement": {
+      "title": "MenuPlacement",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["menuId", "region", "renderer"],
+      "properties": {
+        "menuId": { "$ref": "#/$defs/Identifier" },
+        "region": { "enum": ["top", "left", "right", "bottom"] },
+        "renderer": { "enum": ["tree", "rail", "horizontal", "drawer"] },
+        "breakpoint": { "enum": ["mobile", "tablet", "desktop"] }
+      }
+    },
+    "ShellSettings": {
+      "title": "ShellSettings",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sidebar", "breadcrumbs"],
+      "properties": {
+        "sidebar": { "$ref": "#/$defs/SidebarSettings" },
+        "breadcrumbs": { "$ref": "#/$defs/BreadcrumbSettings" }
+      }
+    },
+    "SidebarSettings": {
+      "title": "SidebarSettings",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "mode", "defaultCollapsed"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 200, "maximum": 360 },
+        "mode": { "enum": ["fixed", "collapsible"] },
+        "defaultCollapsed": { "type": "boolean" },
+        "adminMenuSettingsPath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^/[A-Za-z0-9_:/{}.-]*$"
+        }
+      }
+    },
+    "BreadcrumbSettings": {
+      "title": "BreadcrumbSettings",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "maxDepth"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "maxDepth": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "separator": { "type": "string", "maxLength": 8 }
+      }
+    },
+    "Dashboard": {
+      "title": "DashboardDefinition",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "routeId", "columns", "widgets"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "routeId": { "$ref": "#/$defs/Identifier" },
+        "columns": { "type": "integer", "minimum": 1, "maximum": 12 },
+        "widgets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ComponentInstance" }
+        }
+      }
+    },
+    "Layout": {
+      "title": "WorkspaceLayout",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["template", "regions"],
+      "properties": {
+        "template": { "enum": ["single-column", "split-pane", "dashboard-grid"] },
+        "regions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/LayoutRegion" }
+        }
+      }
+    },
+    "LayoutRegion": {
+      "title": "LayoutRegion",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "order", "instances"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "order": { "type": "integer", "minimum": 0 },
+        "instances": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ComponentInstance" }
+        }
+      }
+    },
+    "ComponentInstance": {
+      "title": "ComponentInstance",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "installationId", "componentId", "settings"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "installationId": { "$ref": "#/$defs/Identifier" },
+        "componentId": { "$ref": "#/$defs/Identifier" },
+        "settings": { "$ref": "#/$defs/SchemaValidatedSettings" }
+      }
+    },
+    "ThemeReference": {
+      "title": "ThemeReference",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Identifier" },
+        "version": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    }
+  }
+}

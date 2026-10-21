@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    tags: ["*"]
+    branches: ["main"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: CI (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [rest, rest-jwt, rest-shadcn, rest-leptos, grpc, rest-rls, axum-diesel, axum-toasty, topcoat-toasty]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v3
+        with:
+          cache_key: "mise-${{ matrix.variant }}"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            generated/${{ matrix.variant }}/target/
+          key: ${{ runner.os }}-cargo-${{ matrix.variant }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - run: mise run ${{ matrix.variant }}

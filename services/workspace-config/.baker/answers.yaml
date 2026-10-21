@@ -1,0 +1,664 @@
+ci_cd:
+  - github
+
+entities:
+  Tenant:
+    kind: collectionType
+    collectionName: tenants
+    priority: 1
+    info:
+      displayName: Tenant
+      singularName: tenant
+      pluralName: tenants
+      description: Organization boundary for Modulaga workspaces
+    attributes:
+      tenant_key:
+        type: string
+        required: true
+        unique: true
+        maxLength: 128
+      name:
+        type: string
+        required: true
+        maxLength: 120
+      status:
+        type: string
+        required: true
+        maxLength: 32
+      workspaces:
+        type: relation
+        relation: oneToMany
+        target: Workspace
+        required: false
+        mappedBy: tenant
+  Workspace:
+    kind: collectionType
+    collectionName: workspaces
+    priority: 2
+    info:
+      displayName: Workspace
+      singularName: workspace
+      pluralName: workspaces
+      description: Tenant-scoped workspace with published configuration
+    attributes:
+      workspace_key:
+        type: string
+        required: true
+        unique: true
+        maxLength: 128
+      name:
+        type: string
+        required: true
+        maxLength: 120
+      status:
+        type: string
+        required: true
+        maxLength: 32
+      published_revision_key:
+        type: string
+        required: false
+        maxLength: 160
+      tenant:
+        type: relation
+        relation: manyToOne
+        target: Tenant
+        required: true
+        mappedBy: workspaces
+      memberships:
+        type: relation
+        relation: oneToMany
+        target: WorkspaceMembership
+        required: false
+        mappedBy: workspace
+      drafts:
+        type: relation
+        relation: oneToMany
+        target: WorkspaceDraft
+        required: false
+        mappedBy: workspace
+      revisions:
+        type: relation
+        relation: oneToMany
+        target: WorkspaceRevision
+        required: false
+        mappedBy: workspace
+      preferences:
+        type: relation
+        relation: oneToMany
+        target: UserWorkspacePreference
+        required: false
+        mappedBy: workspace
+  WorkspaceMembership:
+    kind: collectionType
+    collectionName: workspace_memberships
+    priority: 3
+    info:
+      displayName: Workspace membership
+      singularName: workspace-membership
+      pluralName: workspace-memberships
+      description: External identity subject membership and workspace role
+    attributes:
+      membership_key:
+        type: string
+        required: true
+        unique: true
+        maxLength: 320
+      issuer:
+        type: string
+        required: true
+        maxLength: 512
+      subject:
+        type: string
+        required: true
+        maxLength: 255
+      role:
+        type: string
+        required: true
+        maxLength: 80
+      status:
+        type: string
+        required: true
+        maxLength: 32
+      workspace:
+        type: relation
+        relation: manyToOne
+        target: Workspace
+        required: true
+        mappedBy: memberships
+  WorkspaceDraft:
+    kind: collectionType
+    collectionName: workspace_drafts
+    priority: 4
+    info:
+      displayName: Workspace draft
+      singularName: workspace-draft
+      pluralName: workspace-drafts
+      description: Mutable workspace configuration before publication
+    attributes:
+      draft_key:
+        type: string
+        required: true
+        unique: true
+        maxLength: 160
+      base_revision_key:
+        type: string
+        required: false
+        maxLength: 160
+      configuration_json:
+        type: string
+        required: true
+        maxLength: 1048576
+      version:
+        type: integer
+        required: true
+        min: 1
+      status:
+        type: string
+        required: true
+        maxLength: 32
+      editor_issuer:
+        type: string
+        required: true
+        maxLength: 512
+      editor_subject:
+        type: string
+        required: true
+        maxLength: 255
+      workspace:
+        type: relation
+        relation: manyToOne
+        target: Workspace
+        required: true
+        mappedBy: drafts
+  WorkspaceRevision:
+    kind: collectionType
+    collectionName: workspace_revisions
+    priority: 5
+    info:
+      displayName: Workspace revision
+      singularName: workspace-revision
+      pluralName: workspace-revisions
+      description: Immutable published workspace configuration snapshot
+    attributes:
+      revision_key:
+        type: string
+        required: true
+        unique: true
+        maxLength: 160
+      revision_number:
+        type: integer
+        required: true
+        min: 1
+      parent_revision_key:
+        type: string
+        required: false
+        maxLength: 160
+      configuration_json:
+        type: string
+        required: true
+        maxLength: 1048576
+      content_hash:
+        type: string
+        required: true
+        maxLength: 128
+      publisher_issuer:
+        type: string
+        required: true
+        maxLength: 512
+      publisher_subject:
+        type: string
+        required: true
+        maxLength: 255
+      layout_template:
+        type: string
+        required: true
+        maxLength: 64
+      theme_id:
+        type: string
+        required: false
+        maxLength: 128
+      theme_version:
+        type: string
+        required: false
+        maxLength: 64
+      theme_settings_json:
+        type: string
+        required: false
+        maxLength: 65535
+      workspace:
+        type: relation
+        relation: manyToOne
+        target: Workspace
+        required: true
+        mappedBy: revisions
+      installations:
+        type: relation
+        relation: oneToMany
+        target: WorkspaceInstallation
+        required: false
+        mappedBy: revision
+      routes:
+        type: relation
+        relation: oneToMany
+        target: WorkspaceRoute
+        required: false
+        mappedBy: revision
+      menus:
+        type: relation
+        relation: oneToMany
+        target: MenuDefinition
+        required: false
+        mappedBy: revision
+      layout_regions:
+        type: relation
+        relation: oneToMany
+        target: LayoutRegion
+        required: false
+        mappedBy: revision
+      theme_references:
+        type: relation
+        relation: oneToMany
+        target: WorkspaceThemeReference
+        required: false
+        mappedBy: revision
+  WorkspaceInstallation:
+    kind: collectionType
+    collectionName: workspace_installations
+    priority: 6
+    info:
+      displayName: Workspace installation
+      singularName: workspace-installation
+      pluralName: workspace-installations
+      description: Exact catalog release installed by a workspace revision
+    attributes:
+      installation_key:
+        type: string
+        required: true
+        unique: true
+        maxLength: 320
+      app_id:
+        type: string
+        required: true
+        maxLength: 128
+      release_id:
+        type: string
+        required: true
+        maxLength: 160
+      release_descriptor_json:
+        type: string
+        required: true
+        maxLength: 262144
+      route_base:
+        type: string
+        required: true
+        maxLength: 256
+      settings_json:
+        type: string
+        required: false
+        maxLength: 65535
+      revision:
+        type: relation
+        relation: manyToOne
+        target: WorkspaceRevision
+        required: true
+        mappedBy: installations
+      routes:
+        type: relation
+        relation: oneToMany
+        target: WorkspaceRoute
+        required: false
+        mappedBy: installation
+      component_instances:
+        type: relation
+        relation: oneToMany
+        target: ComponentInstance
+        required: false
+        mappedBy: installation
+  WorkspaceRoute:
+    kind: collectionType
+    collectionName: workspace_routes
+    priority: 7
+    info:
+      displayName: Workspace route
+      singularName: workspace-route
+      pluralName: workspace-routes
+      description: Validated route owned by an installed app in a revision
+    attributes:
+      revision_route_key:
+        type: string
+        required: true
+        unique: true
+        maxLength: 320
+      route_id:
+        type: string
+        required: true
+        maxLength: 128
+      path:
+        type: string
+        required: true
+        maxLength: 256
+      label:
+        type: string
+        required: false
+        maxLength: 120
+      installation:
+        type: relation
+        relation: manyToOne
+        target: WorkspaceInstallation
+        required: true
+        mappedBy: routes
+      revision:
+        type: relation
+        relation: manyToOne
+        target: WorkspaceRevision
+        required: true
+        mappedBy: routes
+  MenuDefinition:
+    kind: collectionType
+    collectionName: menu_definitions
+    priority: 8
+    info:
+      displayName: Menu definition
+      singularName: menu-definition
+      pluralName: menu-definitions
+      description: Workspace menu tree in a published revision
+    attributes:
+      revision_menu_key:
+        type: string
+        required: true
+        unique: true
+        maxLength: 320
+      menu_id:
+        type: string
+        required: true
+        maxLength: 128
+      name:
+        type: string
+        required: true
+        maxLength: 80
+      scope:
+        type: string
+        required: true
+        maxLength: 32
+      revision:
+        type: relation
+        relation: manyToOne
+        target: WorkspaceRevision
+        required: true
+        mappedBy: menus
+      entries:
+        type: relation
+        relation: oneToMany
+        target: MenuEntry
+        required: false
+        mappedBy: menu
+  MenuEntry:
+    kind: collectionType
+    collectionName: menu_entries
+    priority: 9
+    info:
+      displayName: Menu entry
+      singularName: menu-entry
+      pluralName: menu-entries
+      description: Nested menu group or route/external link entry
+    attributes:
+      revision_entry_key:
+        type: string
+        required: true
+        unique: true
+        maxLength: 320
+      entry_id:
+        type: string
+        required: true
+        maxLength: 128
+      entry_type:
+        type: string
+        required: true
+        maxLength: 32
+      label:
+        type: string
+        required: true
+        maxLength: 80
+      icon:
+        type: string
+        required: false
+        maxLength: 80
+      target_route_id:
+        type: string
+        required: false
+        maxLength: 128
+      external_href:
+        type: string
+        required: false
+        maxLength: 2048
+      position:
+        type: integer
+        required: true
+        min: 0
+      sibling_order_key:
+        type: string
+        required: true
+        unique: true
+        maxLength: 512
+      menu:
+        type: relation
+        relation: manyToOne
+        target: MenuDefinition
+        required: true
+        mappedBy: entries
+      parent:
+        type: relation
+        relation: manyToOne
+        target: MenuEntry
+        required: false
+        mappedBy: children
+      children:
+        type: relation
+        relation: oneToMany
+        target: MenuEntry
+        required: false
+        mappedBy: parent
+  LayoutRegion:
+    kind: collectionType
+    collectionName: layout_regions
+    priority: 10
+    info:
+      displayName: Layout region
+      singularName: layout-region
+      pluralName: layout-regions
+      description: Named component region in a workspace revision
+    attributes:
+      revision_region_key:
+        type: string
+        required: true
+        unique: true
+        maxLength: 320
+      region_id:
+        type: string
+        required: true
+        maxLength: 128
+      position:
+        type: integer
+        required: true
+        min: 0
+      breakpoint:
+        type: string
+        required: false
+        maxLength: 32
+      revision:
+        type: relation
+        relation: manyToOne
+        target: WorkspaceRevision
+        required: true
+        mappedBy: layout_regions
+      component_instances:
+        type: relation
+        relation: oneToMany
+        target: ComponentInstance
+        required: false
+        mappedBy: region
+  ComponentInstance:
+    kind: collectionType
+    collectionName: component_instances
+    priority: 11
+    info:
+      displayName: Component instance
+      singularName: component-instance
+      pluralName: component-instances
+      description: Configured app component placed in a workspace region
+    attributes:
+      revision_instance_key:
+        type: string
+        required: true
+        unique: true
+        maxLength: 320
+      instance_id:
+        type: string
+        required: true
+        maxLength: 128
+      component_id:
+        type: string
+        required: true
+        maxLength: 128
+      position:
+        type: integer
+        required: true
+        min: 0
+      settings_json:
+        type: string
+        required: false
+        maxLength: 65535
+      installation:
+        type: relation
+        relation: manyToOne
+        target: WorkspaceInstallation
+        required: true
+        mappedBy: component_instances
+      region:
+        type: relation
+        relation: manyToOne
+        target: LayoutRegion
+        required: true
+        mappedBy: component_instances
+  WorkspaceThemeReference:
+    kind: collectionType
+    collectionName: workspace_theme_references
+    priority: 12
+    info:
+      displayName: Workspace theme reference
+      singularName: workspace-theme-reference
+      pluralName: workspace-theme-references
+      description: Versioned theme selected by a workspace revision
+    attributes:
+      theme_reference_key:
+        type: string
+        required: true
+        unique: true
+        maxLength: 320
+      theme_id:
+        type: string
+        required: true
+        maxLength: 128
+      theme_version:
+        type: string
+        required: true
+        maxLength: 64
+      settings_json:
+        type: string
+        required: false
+        maxLength: 65535
+      revision:
+        type: relation
+        relation: manyToOne
+        target: WorkspaceRevision
+        required: true
+        mappedBy: theme_references
+  UserWorkspacePreference:
+    kind: collectionType
+    collectionName: user_workspace_preferences
+    priority: 13
+    info:
+      displayName: User workspace preference
+      singularName: user-workspace-preference
+      pluralName: user-workspace-preferences
+      description: Allowlisted personal presentation overrides for a workspace
+    attributes:
+      preference_key:
+        type: string
+        required: true
+        unique: true
+        maxLength: 512
+      issuer:
+        type: string
+        required: true
+        maxLength: 512
+      subject:
+        type: string
+        required: true
+        maxLength: 255
+      overrides_json:
+        type: string
+        required: true
+        maxLength: 65535
+      version:
+        type: integer
+        required: true
+        min: 1
+      workspace:
+        type: relation
+        relation: manyToOne
+        target: Workspace
+        required: true
+        mappedBy: preferences
+  AdminNavigationRevision:
+    kind: collectionType
+    collectionName: admin_navigation_revisions
+    priority: 14
+    info:
+      displayName: Admin navigation revision
+      singularName: admin-navigation-revision
+      pluralName: admin-navigation-revisions
+      description: Revisioned admin navigation using registered view identifiers
+    attributes:
+      navigation_key:
+        type: string
+        required: true
+        unique: true
+        maxLength: 320
+      scope_type:
+        type: string
+        required: true
+        maxLength: 32
+      scope_key:
+        type: string
+        required: true
+        maxLength: 160
+      revision_number:
+        type: integer
+        required: true
+        min: 1
+      registry_version:
+        type: string
+        required: true
+        maxLength: 64
+      tree_json:
+        type: string
+        required: true
+        maxLength: 262144
+      publisher_issuer:
+        type: string
+        required: true
+        maxLength: 512
+      publisher_subject:
+        type: string
+        required: true
+        maxLength: 255
+
+features:
+  - open-telemetry
+  - helm
+
+protocols:
+  - grpc
+
+project_name: modulaga-config-api

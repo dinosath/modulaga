@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package modulaga.workspace.v1;
+
+message GetWorkspaceConfigRequest {
+  string workspace_id = 1;
+}
+
+message UpdateWorkspaceConfigRequest {
+  string workspace_id = 1;
+  string config_json = 2;
+  uint64 expected_revision = 3;
+}
+
+message WorkspaceConfigResponse {
+  string workspace_id = 1;
+  string config_json = 2;
+  uint64 revision = 3;
+}
+
+service WorkspaceConfigService {
+  rpc Get(GetWorkspaceConfigRequest) returns (WorkspaceConfigResponse);
+  rpc Update(UpdateWorkspaceConfigRequest) returns (WorkspaceConfigResponse);
+}

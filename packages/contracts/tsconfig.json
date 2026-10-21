@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "allowImportingTsExtensions": false,
+    "allowJs": true,
+    "checkJs": false,
+    "declaration": true,
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src/**/*.ts", "src/**/*.d.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

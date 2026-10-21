@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package modulaga.catalog.v1;
+
+message GetCatalogRequest {}
+
+message CatalogResponse {
+  string catalog_json = 1;
+  uint64 revision = 2;
+}
+
+service CatalogService {
+  rpc Get(GetCatalogRequest) returns (CatalogResponse);
+}

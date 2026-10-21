@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "userId": "demo-user",
+  "workspaceId": "default",
+  "overrides": {
+    "density": "comfortable",
+    "menuMode": "tree",
+    "menuPlacement": { "region": "left", "renderer": "tree" },
+    "layoutTemplate": "single-column",
+    "hiddenMenuEntryIds": [],
+    "menuOrder": ["operations"],
+    "favorites": ["orders-link"]
+  }
+}

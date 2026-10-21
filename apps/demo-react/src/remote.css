@@ -1,0 +1,14 @@
+.remote-surface {
+  border-inline-start: 4px solid #26715c;
+  color: #174d3e;
+  padding: 1rem;
+}
+
+.remote-surface button {
+  background: #26715c;
+  border: 0;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  padding: 0.55rem 0.8rem;
+}
