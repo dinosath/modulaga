@@ -429,7 +429,7 @@ export default function App() {
     });
     const targets = group.type === "section" ? [] : collectMoveTargets(menuEntries(navigation()));
     return <Show when={!sidebarCollapsed()}>
-      <div class="relative ml-auto flex shrink-0 items-center gap-0.5">
+      <div class="group/menu-actions relative ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/menu-item:pointer-events-auto group-hover/menu-item:opacity-100 group-focus-within/menu-item:pointer-events-auto group-focus-within/menu-item:opacity-100 pointer-events-none">
         <Button type="button" variant="ghost" size="icon" class="size-7 text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-sm" aria-label={`Edit ${group.type} ${group.label}`} title={`Edit ${group.label}`} onClick={(event) => { event.stopPropagation(); setSidebarAddEntryTo(undefined); setSidebarEditItemId(group.id); }}><Pencil class="size-3.5" /></Button>
         <Button type="button" variant="ghost" size="icon" class="size-7 text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-sm" aria-label={`Add entry to ${group.label}`} title={`Add entry to ${group.label}`} onClick={(event) => { event.stopPropagation(); beginSidebarAddEntry(group.id); }}><Icon name="plus" class="size-3.5" /></Button>
         <Button type="button" variant="ghost" size="icon" class={`size-7 text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-sm ${sidebarOptionsFor() === group.id ? "bg-background text-foreground shadow-sm" : ""}`} aria-label={`More options for ${group.label}`} title={`More options for ${group.label}`} aria-expanded={sidebarOptionsFor() === group.id ? "true" : "false"} onClick={(event) => {
@@ -492,7 +492,7 @@ export default function App() {
     if (entry.visible === false) return null;
     if (entry.type === "section") {
       return <section class="mb-4" aria-label={`${entry.label} menu`}>
-        <div class={`group/header relative mb-1 flex min-h-9 items-center rounded-md transition-colors hover:bg-accent/70 ${sidebarCollapsed() ? "justify-center px-0" : "px-1"}`}>
+        <div class={`group/menu-item group/header relative mb-1 flex min-h-9 items-center rounded-md transition-colors hover:bg-accent/70 ${sidebarCollapsed() ? "justify-center px-0" : "px-1"}`}>
           <Show when={!sidebarCollapsed()}><h2 class="min-w-0 flex-1 truncate px-1 py-2 text-[13px] font-medium text-muted-foreground">{entry.label}</h2></Show>
           {renderSidebarGroupActions(entry)}
         </div>
@@ -502,11 +502,16 @@ export default function App() {
     if (entry.type !== "group") return renderSidebarLink(entry, depth);
     const expanded = () => menuGroupExpanded(entry);
     return <div class="mb-0.5">
-      <div class="group/menu-row flex items-center rounded-md transition-colors hover:bg-accent/70" style={{ "padding-left": `${sidebarCollapsed() ? 0 : Math.max(0, depth - 1) * 16}px` }}>
+      <div class="group/menu-item group/menu-row flex items-center rounded-md transition-colors hover:bg-accent/70" style={{ "padding-left": `${sidebarCollapsed() ? 0 : Math.max(0, depth - 1) * 16}px` }}>
         <button class={`flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded-md text-left text-sm text-foreground ${sidebarCollapsed() ? "justify-center px-0" : "px-2"}`} type="button" title={entry.label} aria-label={entry.label} aria-expanded={expanded() ? "true" : "false"} onClick={() => toggleMenuGroup(entry)}>
-          <Icon name={entry.icon ?? "grid"} class="size-4 shrink-0" /><Show when={!sidebarCollapsed()}><span class="min-w-0 flex-1 truncate">{entry.label}</span><Show when={entry.chevron !== false}><Icon name="down" class={`size-4 transition-transform ${expanded() ? "rotate-0" : "-rotate-90"}`} /></Show></Show>
+          <Icon name={entry.icon ?? "grid"} class="size-4 shrink-0" /><Show when={!sidebarCollapsed()}><span class="min-w-0 flex-1 truncate">{entry.label}</span></Show>
         </button>
         {renderSidebarGroupActions(entry)}
+        <Show when={!sidebarCollapsed() && entry.chevron !== false}>
+          <button class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground" type="button" title={`${expanded() ? "Collapse" : "Expand"} ${entry.label}`} aria-label={`${expanded() ? "Collapse" : "Expand"} ${entry.label}`} aria-expanded={expanded() ? "true" : "false"} onClick={() => toggleMenuGroup(entry)}>
+            <Icon name="down" class={`size-4 transition-transform ${expanded() ? "rotate-0" : "-rotate-90"}`} />
+          </button>
+        </Show>
       </div>
       <Show when={expanded()}><ul class="m-0 list-none p-0"><For each={entry.children}>{(child) => <li>{renderSidebarEntry(child, depth + 1)}</li>}</For></ul></Show>
     </div>;
@@ -647,9 +652,9 @@ export default function App() {
   });
 
   return (
-    <div class="flex min-h-screen bg-background font-sans text-foreground">
+    <div class="flex h-dvh overflow-hidden bg-background font-sans text-foreground">
       <Show when={sidebarMenu()}>
-        <aside class="sticky top-0 flex h-screen min-h-0 shrink-0 flex-col self-start border-r border-border bg-muted/30" style={{ width: `${sidebarCollapsed() ? 48 : navigation().shell?.sidebar.width ?? 256}px` }}>
+        <aside class="sticky top-0 flex h-dvh min-h-0 shrink-0 flex-col self-start border-r border-border bg-muted/30" style={{ width: `${sidebarCollapsed() ? 48 : navigation().shell?.sidebar.width ?? 256}px` }}>
           <div class={`flex ${sidebarCollapsed() ? "h-24 shrink-0 flex-col px-0" : "h-[52px] items-center gap-2 px-3"}`}>
             <a class={`brand flex min-w-0 items-center gap-2.5 text-foreground no-underline ${sidebarCollapsed() ? "h-12 w-full shrink-0 justify-center" : "flex-1"}`} href="/" onClick={(event) => { event.preventDefault(); clearActiveApplication(); window.history.pushState({}, "", "/"); }}>
               <span class="grid size-8 shrink-0 place-items-center rounded-lg bg-background text-primary"><Icon name="box" class="size-4" /></span>
@@ -668,7 +673,7 @@ export default function App() {
         </aside>
       </Show>
 
-      <div class="flex min-w-0 flex-1 flex-col">
+      <div class="flex min-h-0 min-w-0 flex-1 flex-col">
         <header class="flex h-[52px] shrink-0 items-center gap-3 border-b border-border bg-background px-4 sm:px-6">
           <span class="truncate text-sm font-medium">{navigation().workspace.name}</span>
           <Show when={!sidebarMenu()}>
@@ -689,7 +694,7 @@ export default function App() {
           </div>
         </header>
 
-        <main class="min-w-0 flex-1 overflow-x-hidden px-5 py-6 sm:px-6 lg:px-7">
+        <main class={`min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 py-6 sm:px-6 lg:px-7 ${studioOpen() ? "hide-scrollbar" : ""}`}>
           <Show when={studioOpen()} fallback={
             <Show when={activeRoute()} fallback={
                 <section aria-label="Configured dashboard" class="mx-auto max-w-[1600px]">

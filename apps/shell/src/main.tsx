@@ -1,5 +1,6 @@
 import { render } from "@solidjs/web";
 import App from "./App";
+import "./shell-layout.css";
 import "virtual:uno.css";
 
 const root = document.getElementById("root");

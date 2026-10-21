@@ -1,4 +1,21 @@
 import { For, Show, createSignal } from "solid-js";
+import type { LucideIcon } from "@lucide/solid";
+import {
+  Bell,
+  Box,
+  Briefcase,
+  ChartNoAxesCombined,
+  Grid,
+  Monitor,
+  Search,
+  Settings,
+  ShoppingBag,
+  ShoppingCart,
+  Truck,
+  UserRound,
+  UsersRound,
+} from "@lucide/solid";
+import { Dynamic } from "@solidjs/web";
 import type { NavigationContainer, NavigationEntry, NavigationGroup, WorkspaceNavigation } from "../config/navigation";
 import { isNavigationContainer } from "../config/navigation";
 import { Button } from "./ui/button";
@@ -14,7 +31,21 @@ type Props = {
   onSave: (item: NavigationEntry, parentId?: string) => void;
 };
 
-const iconNames = ["grid", "chart", "bag", "cart", "users", "truck", "box", "briefcase", "search", "bell", "monitor", "settings", "user"];
+const iconOptions: { name: string; component: LucideIcon }[] = [
+  { name: "grid", component: Grid },
+  { name: "chart", component: ChartNoAxesCombined },
+  { name: "bag", component: ShoppingBag },
+  { name: "cart", component: ShoppingCart },
+  { name: "users", component: UsersRound },
+  { name: "truck", component: Truck },
+  { name: "box", component: Box },
+  { name: "briefcase", component: Briefcase },
+  { name: "search", component: Search },
+  { name: "bell", component: Bell },
+  { name: "monitor", component: Monitor },
+  { name: "settings", component: Settings },
+  { name: "user", component: UserRound },
+];
 
 function findParentId(entries: NavigationEntry[], childId: string): string | undefined {
   for (const entry of entries) {
@@ -119,7 +150,18 @@ export function AddMenuItemDialog(props: Props) {
           </fieldset>
         </Show>
         <label class="grid gap-2 text-sm font-medium text-foreground">{item()?.type === "section" ? "Section name" : type() === "group" ? "Group name" : "Entry label"}<Input name="menu-item-label" aria-label="Menu item label" value={label()} onInput={(event) => setLabel(event.currentTarget.value)} placeholder={type() === "group" ? "e.g. Reports" : "e.g. Monthly report"} required /></label>
-        <Show when={item()?.type !== "section"}><label class="grid gap-2 text-sm font-medium text-foreground">Icon<select name="menu-item-icon" class={selectClass} aria-label="Menu item icon" value={icon()} onChange={(event) => setIcon(event.currentTarget.value)}><Show when={item()?.icon && !iconNames.includes(item()!.icon!)}><option value={item()!.icon}>{item()!.icon}</option></Show><For each={iconNames}>{(name) => <option value={name}>{name}</option>}</For></select></label></Show>
+        <Show when={item()?.type !== "section"}>
+          <fieldset class="grid gap-2">
+            <legend class="text-sm font-medium text-foreground">Icon</legend>
+            <input type="hidden" name="menu-item-icon" value={icon()} />
+            <div class="grid max-h-44 grid-cols-2 gap-1 overflow-y-auto rounded-md border border-border p-1" role="group" aria-label="Choose menu item icon">
+              <Show when={icon() && !iconOptions.some((option) => option.name === icon())}>
+                <button type="button" aria-pressed="true" class="flex min-h-9 items-center gap-2 rounded-md bg-accent px-2 text-left text-sm text-accent-foreground"><Dynamic component={Grid} class="size-4 shrink-0" aria-hidden="true" /><span class="truncate">{icon()}</span></button>
+              </Show>
+              <For each={iconOptions}>{(option) => <button type="button" aria-pressed={icon() === option.name ? "true" : "false"} class={`flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm transition-colors ${icon() === option.name ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-accent/70"}`} onClick={() => setIcon(option.name)}><Dynamic component={option.component} class="size-4 shrink-0" aria-hidden="true" /><span>{option.name}</span></button>}</For>
+            </div>
+          </fieldset>
+        </Show>
         <Show when={item()?.type !== "section"}>
           <fieldset class="grid gap-1">
             <legend class="text-sm font-medium text-foreground">Parent menu</legend>
