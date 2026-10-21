@@ -200,6 +200,13 @@ export default function App() {
     setRemoteStatus("Choose a configured page from the workspace menu.");
   }
 
+  function closeSidebarOptionsOnOutsideClick(event: PointerEvent) {
+    const target = event.target;
+    if (target instanceof Element && target.closest("[data-sidebar-options-root]")) return;
+    setSidebarOptionsFor(undefined);
+    setSidebarMoveTreeFor(undefined);
+  }
+
   function openRoute(routeId: string, updateHistory = true, menuEntryId?: string) {
     const route = navigation().routes.find((candidate) => candidate.id === routeId);
     if (!route) return;
@@ -341,6 +348,41 @@ export default function App() {
     setSidebarOptionsFor(undefined);
   }
 
+  function moveMenuEntryTo(entryId: string, destinationId: string) {
+    const current = menuEntries(navigation());
+    const source = findMenuEntry(entryId, current);
+    const destination = findMenuEntry(destinationId, current);
+    if (!source || !destination || !isNavigationContainer(destination) || (isNavigationContainer(source) && containsMenuEntry(source, destinationId))) return;
+    const remove = (items: NavigationEntry[]): { removed?: NavigationEntry; entries: NavigationEntry[] } => {
+      const index = items.findIndex((entry) => entry.id === entryId);
+      if (index >= 0) {
+        const next = [...items];
+        const [removed] = next.splice(index, 1);
+        return removed ? { removed, entries: next } : { entries: items };
+      }
+      for (let index = 0; index < items.length; index += 1) {
+        const entry = items[index]!;
+        if (!isNavigationContainer(entry)) continue;
+        const result = remove(entry.children);
+        if (result.removed) {
+          const next = [...items];
+          next[index] = { ...entry, children: result.entries };
+          return { removed: result.removed, entries: next };
+        }
+      }
+      return { entries: items };
+    };
+    const removed = remove(current);
+    if (!removed.removed) return;
+    const insert = (items: NavigationEntry[]): NavigationEntry[] => items.map((entry) => {
+      if (entry.id === destinationId && isNavigationContainer(entry)) return { ...entry, children: [...entry.children, removed.removed!] };
+      return isNavigationContainer(entry) ? { ...entry, children: insert(entry.children) } : entry;
+    });
+    persistMenuEntries(insert(removed.entries));
+    setSidebarOptionsFor(undefined);
+    setSidebarMoveTreeFor(undefined);
+  }
+
   function beginSidebarAddEntry(groupId: string) {
     setSidebarOptionsFor(undefined);
     setSidebarMoveTreeFor(undefined);
@@ -432,7 +474,7 @@ export default function App() {
       <div class="group/menu-actions relative ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/menu-item:pointer-events-auto group-hover/menu-item:opacity-100 group-focus-within/menu-item:pointer-events-auto group-focus-within/menu-item:opacity-100 pointer-events-none">
         <Button type="button" variant="ghost" size="icon" class="size-7 text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-sm" aria-label={`Edit ${group.type} ${group.label}`} title={`Edit ${group.label}`} onClick={(event) => { event.stopPropagation(); setSidebarAddEntryTo(undefined); setSidebarEditItemId(group.id); }}><Pencil class="size-3.5" /></Button>
         <Button type="button" variant="ghost" size="icon" class="size-7 text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-sm" aria-label={`Add entry to ${group.label}`} title={`Add entry to ${group.label}`} onClick={(event) => { event.stopPropagation(); beginSidebarAddEntry(group.id); }}><Icon name="plus" class="size-3.5" /></Button>
-        <Button type="button" variant="ghost" size="icon" class={`size-7 text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-sm ${sidebarOptionsFor() === group.id ? "bg-background text-foreground shadow-sm" : ""}`} aria-label={`More options for ${group.label}`} title={`More options for ${group.label}`} aria-expanded={sidebarOptionsFor() === group.id ? "true" : "false"} onClick={(event) => {
+        <Button data-sidebar-options-root type="button" variant="ghost" size="icon" class={`size-7 text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-sm ${sidebarOptionsFor() === group.id ? "bg-background text-foreground shadow-sm" : ""}`} aria-label={`More options for ${group.label}`} title={`More options for ${group.label}`} aria-expanded={sidebarOptionsFor() === group.id ? "true" : "false"} onClick={(event) => {
           event.stopPropagation();
           if (sidebarOptionsFor() === group.id) {
             setSidebarOptionsFor(undefined);
@@ -450,7 +492,7 @@ export default function App() {
         }}><Icon name="more" class="size-4" /></Button>
         <Show when={sidebarOptionsFor() === group.id}>
           <Portal>
-          <div class="fixed z-[110] w-52 rounded-md border border-border bg-background p-1 text-foreground shadow-md" style={{ top: `${sidebarOptionsPosition().top}px`, left: `${sidebarOptionsPosition().left}px` }} role="menu" aria-label={`${group.label} options`} onClick={(event) => event.stopPropagation()}>
+          <div data-sidebar-options-root class="fixed z-[110] w-52 rounded-md border border-border bg-background p-1 text-foreground shadow-md" style={{ top: `${sidebarOptionsPosition().top}px`, left: `${sidebarOptionsPosition().left}px` }} role="menu" aria-label={`${group.label} options`} onClick={(event) => event.stopPropagation()}>
             <button class="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70 disabled:cursor-not-allowed disabled:opacity-40" type="button" role="menuitem" disabled={position <= 0} onClick={() => moveMenuEntry(group.id, -1)}><Icon name="up" class="size-4 text-muted-foreground" />Move up</button>
             <button class="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70 disabled:cursor-not-allowed disabled:opacity-40" type="button" role="menuitem" disabled={position < 0 || position >= siblings.length - 1} onClick={() => moveMenuEntry(group.id, 1)}><Icon name="downArrow" class="size-4 text-muted-foreground" />Move down</button>
             <button class="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70" type="button" role="menuitem" aria-expanded={sidebarMoveTreeFor() === group.id ? "true" : "false"} onClick={() => setSidebarMoveTreeFor((current) => current === group.id ? undefined : group.id)}><Icon name="right" class="size-4 text-muted-foreground" /><span class="flex-1">Move to</span><Icon name="rightChevron" class="size-4 text-muted-foreground" /></button>
@@ -472,6 +514,18 @@ export default function App() {
   function renderSidebarLink(entry: NavigationLink, depth: number) {
     const icon = <Icon name={entry.icon ?? (entry.type === "action" ? "settings" : "grid")} class="size-4 shrink-0" />;
     const active = () => activeMenuEntryId() === entry.id;
+    const siblings = () => findMenuSiblings(entry.id) ?? [];
+    const position = () => siblings().findIndex((sibling) => sibling.id === entry.id);
+    const targets = () => {
+      const output: { id: string; label: string; depth: number }[] = [];
+      const walk = (items: NavigationEntry[], targetDepth = 0) => items.forEach((candidate) => {
+        if (!isNavigationContainer(candidate)) return;
+        output.push({ id: candidate.id, label: candidate.label, depth: targetDepth });
+        walk(candidate.children, targetDepth + 1);
+      });
+      walk(menuEntries(navigation()));
+      return output;
+    };
     return <div class={`group/entry flex min-w-0 items-center gap-0.5 rounded-md transition-colors ${active() ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-accent/70"}`}>
     <a
       class={`flex min-w-0 min-h-9 flex-1 items-center gap-2 rounded-md text-sm no-underline transition-colors ${sidebarCollapsed() ? "justify-center px-0" : "px-2"} ${active() ? "text-accent-foreground" : "text-foreground hover:bg-transparent"}`}
@@ -484,7 +538,41 @@ export default function App() {
       target={entry.type === "external" ? "_blank" : undefined}
       rel={entry.type === "external" ? "noopener noreferrer" : undefined}
     >{icon}<Show when={!sidebarCollapsed()}><span class="min-w-0 flex-1 truncate">{entry.label}</span></Show></a>
-    <Show when={!sidebarCollapsed()}><Button type="button" variant="ghost" size="icon" class="size-7 shrink-0 text-muted-foreground opacity-0 transition-opacity hover:bg-background hover:text-foreground hover:shadow-sm focus-visible:opacity-100 group-hover/entry:opacity-100 hover:opacity-100" aria-label={`Edit entry ${entry.label}`} title={`Edit ${entry.label}`} onClick={() => { setSidebarAddEntryTo(undefined); setSidebarEditItemId(entry.id); }}><Pencil class="size-3.5" /></Button></Show>
+    <Show when={!sidebarCollapsed()}>
+      <div class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/entry:opacity-100 group-focus-within/entry:opacity-100 pointer-events-none group-hover/entry:pointer-events-auto group-focus-within/entry:pointer-events-auto">
+        <Button type="button" variant="ghost" size="icon" class="size-7 text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-sm" aria-label={`Edit entry ${entry.label}`} title={`Edit ${entry.label}`} onClick={() => { setSidebarAddEntryTo(undefined); setSidebarEditItemId(entry.id); }}><Pencil class="size-3.5" /></Button>
+        <Button type="button" variant="ghost" size="icon" class="size-7 text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-sm" aria-label={`Delete entry ${entry.label}`} title={`Delete ${entry.label}`} onClick={(event) => { event.stopPropagation(); removeMenuGroup(entry.id); }}><Icon name="trash" class="size-3.5" /></Button>
+        <Button data-sidebar-options-root type="button" variant="ghost" size="icon" class={`size-7 text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-sm ${sidebarOptionsFor() === entry.id ? "bg-background text-foreground shadow-sm" : ""}`} aria-label={`Settings for entry ${entry.label}`} title={`Settings for ${entry.label}`} aria-expanded={sidebarOptionsFor() === entry.id ? "true" : "false"} onClick={(event) => {
+          event.stopPropagation();
+          if (sidebarOptionsFor() === entry.id) {
+            setSidebarOptionsFor(undefined);
+            return;
+          }
+          const bounds = event.currentTarget.getBoundingClientRect();
+          const width = 208;
+          setSidebarOptionsPosition({ top: Math.max(8, Math.min(bounds.top, window.innerHeight - 300)), left: Math.max(8, Math.min(bounds.right + 8, window.innerWidth - width - 8)) });
+          setSidebarOptionsFor(entry.id);
+          setSidebarMoveTreeFor(undefined);
+          setSidebarAddEntryTo(undefined);
+        }}><Icon name="more" class="size-4" /></Button>
+        <Show when={sidebarOptionsFor() === entry.id}>
+          <Portal>
+            <div data-sidebar-options-root class="fixed z-[110] w-52 rounded-md border border-border bg-background p-1 text-foreground shadow-md" style={{ top: `${sidebarOptionsPosition().top}px`, left: `${sidebarOptionsPosition().left}px` }} role="menu" aria-label={`Settings for ${entry.label}`} onClick={(event) => event.stopPropagation()}>
+              <button class="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70 disabled:cursor-not-allowed disabled:opacity-40" type="button" role="menuitem" disabled={position() <= 0} onClick={() => moveMenuEntry(entry.id, -1)}><Icon name="up" class="size-4 text-muted-foreground" />Move up</button>
+              <button class="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70 disabled:cursor-not-allowed disabled:opacity-40" type="button" role="menuitem" disabled={position() < 0 || position() >= siblings().length - 1} onClick={() => moveMenuEntry(entry.id, 1)}><Icon name="downArrow" class="size-4 text-muted-foreground" />Move down</button>
+              <button class="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70" type="button" role="menuitem" aria-expanded={sidebarMoveTreeFor() === entry.id ? "true" : "false"} onClick={() => setSidebarMoveTreeFor((current) => current === entry.id ? undefined : entry.id)}><Icon name="right" class="size-4 text-muted-foreground" /><span class="flex-1">Move to</span><Icon name="rightChevron" class="size-4 text-muted-foreground" /></button>
+              <Show when={sidebarMoveTreeFor() === entry.id}>
+                <div class="my-1 max-h-48 overflow-y-auto border-y border-border py-1" role="group" aria-label={`Move ${entry.label} to menu`}>
+                  <For each={targets()}>{(target) => <button class="flex min-h-9 w-full items-center gap-2 rounded-md pr-2 text-left text-sm text-foreground hover:bg-accent/70" style={{ "padding-left": `${8 + target.depth * 12}px` }} type="button" onClick={() => moveMenuEntryTo(entry.id, target.id)}><Icon name="rightChevron" class="size-3.5 text-muted-foreground" />{target.label}</button>}</For>
+                </div>
+              </Show>
+              <div class="my-1 border-t border-border" />
+              <button class="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-destructive hover:bg-accent/70" type="button" role="menuitem" onClick={() => removeMenuGroup(entry.id)}><Icon name="trash" class="size-4" />Delete entry</button>
+            </div>
+          </Portal>
+        </Show>
+      </div>
+    </Show>
     </div>;
   }
 
@@ -632,6 +720,7 @@ export default function App() {
 
   onSettled(() => {
     window.addEventListener("popstate", handlePopState);
+    document.addEventListener("pointerdown", closeSidebarOptionsOnOutsideClick);
     void finishSignIn().then((signedIn) => {
       if (signedIn) setAccessToken(getAccessToken() ?? "");
     }).catch((error: unknown) => setWorkspaceStatus(error instanceof Error ? error.message : "Ferriskey sign-in failed"));
@@ -647,6 +736,7 @@ export default function App() {
     });
     return () => {
       window.removeEventListener("popstate", handlePopState);
+      document.removeEventListener("pointerdown", closeSidebarOptionsOnOutsideClick);
       clearRemote();
     };
   });
