@@ -1,0 +1,5 @@
+window.MODULAGA_CONFIG = {
+  applicationGeneratorApiUrl: "${MODULAGA_APPLICATION_GENERATOR_API_URL}",
+  ferriskeyIssuer: "${MODULAGA_FERRISKEY_ISSUER}",
+  ferriskeyClientId: "${MODULAGA_FERRISKEY_CLIENT_ID}"
+};

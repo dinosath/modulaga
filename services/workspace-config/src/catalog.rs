@@ -6,24 +6,15 @@ pub fn validate_catalog(catalog: &Value) -> Result<(), String> {
     if object.get("schemaVersion").and_then(Value::as_u64) != Some(1) {
         return Err("catalog schemaVersion must be 1".into());
     }
-    let apps = object
-        .get("apps")
-        .and_then(Value::as_array)
-        .ok_or("catalog apps must be an array")?;
+    let apps =
+        object.get("apps").and_then(Value::as_array).ok_or("catalog apps must be an array")?;
     let mut app_ids = HashSet::new();
     for app in apps {
-        let id = app
-            .get("id")
-            .and_then(Value::as_str)
-            .ok_or("each catalog app needs an id")?;
+        let id = app.get("id").and_then(Value::as_str).ok_or("each catalog app needs an id")?;
         if id.is_empty() || id.len() > 128 || !app_ids.insert(id) {
             return Err("catalog app IDs must be non-empty, bounded, and unique".into());
         }
-        if app
-            .get("name")
-            .and_then(Value::as_str)
-            .filter(|name| !name.trim().is_empty())
-            .is_none()
+        if app.get("name").and_then(Value::as_str).filter(|name| !name.trim().is_empty()).is_none()
         {
             return Err("each catalog app needs a name".into());
         }
@@ -80,12 +71,16 @@ fn is_loopback_http_manifest(manifest: &str) -> bool {
     let hostname = if authority.starts_with('[') {
         authority.split_once(']').and_then(|(host, suffix)| {
             let port_is_valid = suffix.is_empty()
-                || suffix.strip_prefix(':').is_some_and(|port| !port.is_empty() && port.bytes().all(|byte| byte.is_ascii_digit()));
+                || suffix.strip_prefix(':').is_some_and(|port| {
+                    !port.is_empty() && port.bytes().all(|byte| byte.is_ascii_digit())
+                });
             port_is_valid.then(|| format!("{host}]"))
         })
     } else {
         let (host, port_is_valid) = match authority.split_once(':') {
-            Some((host, port)) => (host, !port.is_empty() && port.bytes().all(|byte| byte.is_ascii_digit())),
+            Some((host, port)) => {
+                (host, !port.is_empty() && port.bytes().all(|byte| byte.is_ascii_digit()))
+            }
             None => (authority, true),
         };
         port_is_valid.then(|| host.to_ascii_lowercase())
@@ -111,10 +106,7 @@ mod tests {
 
     #[test]
     fn rejects_invalid_catalog_and_application_identity() {
-        assert_eq!(
-            validate_catalog(&Value::Null),
-            Err("catalog must be an object".into())
-        );
+        assert_eq!(validate_catalog(&Value::Null), Err("catalog must be an object".into()));
         assert_eq!(
             validate_catalog(&serde_json::json!({"schemaVersion":2,"apps":[]})),
             Err("catalog schemaVersion must be 1".into())
@@ -181,7 +173,10 @@ mod tests {
         ] {
             let mut local_app = app();
             local_app["releases"][0]["manifestUrl"] = local.into();
-            assert!(validate_catalog(&serde_json::json!({"schemaVersion":1,"apps":[local_app]})).is_ok());
+            assert!(
+                validate_catalog(&serde_json::json!({"schemaVersion":1,"apps":[local_app]}))
+                    .is_ok()
+            );
         }
         for unsafe_url in [
             "http://localhost.evil.test/mf.json",
@@ -190,7 +185,9 @@ mod tests {
         ] {
             let mut invalid = app();
             invalid["releases"][0]["manifestUrl"] = unsafe_url.into();
-            assert!(validate_catalog(&serde_json::json!({"schemaVersion":1,"apps":[invalid]})).is_err());
+            assert!(
+                validate_catalog(&serde_json::json!({"schemaVersion":1,"apps":[invalid]})).is_err()
+            );
         }
         let mut invalid = app();
         invalid["releases"][0]["remoteName"] = "".into();

@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package modulaga.contenttypes.v1;
+
+message ListContentTypesRequest {}
+
+message ContentTypeRecord {
+  string uid = 1;
+  string schema_json = 2;
+  uint64 revision = 3;
+}
+
+message ListContentTypesResponse {
+  repeated ContentTypeRecord content_types = 1;
+}
+
+message GetContentTypeRequest { string uid = 1; }
+message SaveContentTypeRequest {
+  string uid = 1;
+  string schema_json = 2;
+  uint64 expected_revision = 3;
+}
+message DeleteContentTypeRequest { string uid = 1; }
+message DeleteContentTypeResponse { bool deleted = 1; }
+
+service ContentTypesService {
+  rpc List(ListContentTypesRequest) returns (ListContentTypesResponse);
+  rpc Get(GetContentTypeRequest) returns (ContentTypeRecord);
+  rpc Save(SaveContentTypeRequest) returns (ContentTypeRecord);
+  rpc Delete(DeleteContentTypeRequest) returns (DeleteContentTypeResponse);
+}

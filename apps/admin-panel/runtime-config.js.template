@@ -1,0 +1,6 @@
+window.MODULAGA_CONFIG = {
+  configApiUrl: "${MODULAGA_CONFIG_API_URL}",
+  workspaceId: "${MODULAGA_WORKSPACE_ID}",
+  ferriskeyIssuer: "${MODULAGA_FERRISKEY_ISSUER}",
+  ferriskeyClientId: "${MODULAGA_FERRISKEY_CLIENT_ID}"
+};

@@ -1,6 +1,8 @@
 export type RuntimeConfig = {
   configApiUrl?: string;
   catalogApiUrl?: string;
+  contentTypesApiUrl?: string;
+  applicationGeneratorApiUrl?: string;
   workspaceId?: string;
   ferriskeyIssuer?: string;
   ferriskeyClientId?: string;

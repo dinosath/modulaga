@@ -2,7 +2,10 @@ use async_trait::async_trait;
 use serde_json::Value;
 use sqlx::{PgPool, Row};
 
-use crate::{StoreError, WorkspaceConfigRecord, WorkspaceStore, migrate_admin_panel_paths};
+use crate::{
+    StoreError, WorkspaceConfigRecord, WorkspaceStore, merge_seed_defaults,
+    migrate_admin_panel_paths,
+};
 
 pub struct PostgresWorkspaceStore {
     pool: PgPool,
@@ -10,9 +13,7 @@ pub struct PostgresWorkspaceStore {
 
 impl PostgresWorkspaceStore {
     pub async fn connect(
-        database_url: &str,
-        seed_id: &str,
-        seed: Value,
+        database_url: &str, seed_id: &str, seed: Value,
     ) -> Result<Self, sqlx::Error> {
         let pool = PgPool::connect(database_url).await?;
         sqlx::query(
@@ -20,13 +21,12 @@ impl PostgresWorkspaceStore {
         ).execute(&pool).await?;
         sqlx::query("INSERT INTO workspace_configs (workspace_id, config, revision) VALUES ($1, $2, 0) ON CONFLICT (workspace_id) DO NOTHING")
             .bind(seed_id).bind(seed.clone()).execute(&pool).await?;
-        let mut stored: Value = sqlx::query_scalar(
-            "SELECT config FROM workspace_configs WHERE workspace_id = $1",
-        )
-        .bind(seed_id)
-        .fetch_one(&pool)
-        .await?;
-        if migrate_admin_panel_paths(&mut stored, &seed) {
+        let mut stored: Value =
+            sqlx::query_scalar("SELECT config FROM workspace_configs WHERE workspace_id = $1")
+                .bind(seed_id)
+                .fetch_one(&pool)
+                .await?;
+        if merge_seed_defaults(&mut stored, &seed) | migrate_admin_panel_paths(&mut stored, &seed) {
             sqlx::query(
                 "UPDATE workspace_configs SET config = $2, revision = revision + 1, updated_at = now() WHERE workspace_id = $1",
             )
@@ -67,10 +67,7 @@ impl WorkspaceStore for PostgresWorkspaceStore {
     }
 
     async fn update(
-        &self,
-        workspace_id: &str,
-        expected_revision: u64,
-        config: Value,
+        &self, workspace_id: &str, expected_revision: u64, config: Value,
     ) -> Result<WorkspaceConfigRecord, StoreError> {
         let expected_revision =
             i64::try_from(expected_revision).map_err(|_| StoreError::RevisionConflict)?;
@@ -83,11 +80,6 @@ impl WorkspaceStore for PostgresWorkspaceStore {
             StoreError::Unavailable
         })?)
         .map_err(|_| StoreError::Unavailable)?;
-        Ok(WorkspaceConfigRecord {
-            workspace_id: workspace_id.to_owned(),
-            config,
-            revision,
-        })
+        Ok(WorkspaceConfigRecord { workspace_id: workspace_id.to_owned(), config, revision })
     }
 }
-

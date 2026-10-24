@@ -1,16 +1,12 @@
 import { createInstance } from "@module-federation/enhanced/runtime";
+import type { MicrofrontendRouteContext as SharedMicrofrontendRouteContext } from "../../../../packages/contracts/src/microfrontend";
 import type { ApplicationRelease } from "../workspace/api";
 
 type RemoteModule = {
   mount(container: HTMLElement, context: MicrofrontendRouteContext): () => void;
 };
 
-export type MicrofrontendRouteContext = {
-  workspaceId: string;
-  installationId: string;
-  routeId: string;
-  path: string;
-};
+export type MicrofrontendRouteContext = SharedMicrofrontendRouteContext;
 
 const noop = () => {};
 

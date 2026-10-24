@@ -15,6 +15,8 @@ export type {
   InternalMenuEntry,
   LayoutRegion,
   MenuDefinition,
+  MenuButtonBinding,
+  MenuItemButtonActions,
   MenuEntry,
   MenuGroup,
   MenuPlacement,
@@ -30,6 +32,7 @@ export type {
   WorkspaceRoute,
 } from "./generated/workspace.types.js";
 export type { WorkspacePreferences } from "./generated/preferences.types.js";
+export type { MicrofrontendBreadcrumb, MicrofrontendRouteContext } from "./microfrontend.js";
 export type {
   AdminNavigation,
   AdminNavigationScope,

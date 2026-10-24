@@ -1,0 +1,15 @@
+min_version = "2024.1.0"
+
+[tools]
+rust = "latest"
+
+[tasks.dev]
+description = "Run the content types backend service"
+run = '''
+mkdir -p ../../.data
+AUTH_MODE=disabled CONTENT_TYPES_DATABASE_URL="sqlite://../../.data/content-types.sqlite?mode=rwc" cargo run --bin content-types
+'''
+
+[tasks.build]
+description = "Build the content types backend service"
+run = "cargo build --bin content-types"

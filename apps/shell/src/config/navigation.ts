@@ -1,6 +1,21 @@
 import initialWorkspace from "../../../../workspace-config/workspaces/default.json";
 
-type NavigationBase = { id: string; label: string; icon?: string; visible?: boolean };
+export type MenuItemButtons = { edit?: boolean; visibility?: boolean; delete?: boolean; options?: boolean; add?: boolean; moveUp?: boolean; moveDown?: boolean; moveTo?: boolean };
+export type MenuItemActionKey = Exclude<keyof MenuItemButtons, "options">;
+export type MenuButtonBinding =
+  | { type: "client"; clientId: string; actionId: string }
+  | { type: "component"; componentId: string };
+export type MenuItemButtonActions = Partial<Record<MenuItemActionKey, MenuButtonBinding>>;
+export const defaultMenuItemButtonActions: Record<MenuItemActionKey, MenuButtonBinding> = {
+  edit: { type: "component", componentId: "menu-item-editor" },
+  visibility: { type: "client", clientId: "workspace-menu", actionId: "visibility" },
+  delete: { type: "client", clientId: "workspace-menu", actionId: "delete" },
+  add: { type: "client", clientId: "workspace-menu", actionId: "add" },
+  moveUp: { type: "client", clientId: "workspace-menu", actionId: "moveUp" },
+  moveDown: { type: "client", clientId: "workspace-menu", actionId: "moveDown" },
+  moveTo: { type: "client", clientId: "workspace-menu", actionId: "moveTo" },
+};
+type NavigationBase = { id: string; label: string; icon?: string; visible?: boolean; buttons?: MenuItemButtons; buttonActions?: MenuItemButtonActions };
 export type RouteMenuEntry = NavigationBase & { type: "route"; routeId: string };
 export type ExternalMenuEntry = NavigationBase & { type: "external"; href: string };
 export type ActionMenuEntry = NavigationBase & { type: "action"; action: "admin-panel"; path: string };
@@ -15,6 +30,7 @@ export type NavigationGroup = NavigationBase & {
 export type NavigationContainer = NavigationSection | NavigationGroup;
 export type NavigationEntry = NavigationLink | NavigationContainer;
 export type DashboardWidget = { id: string; installationId: string; componentId: string; settings: { schemaId: string; value: Record<string, unknown> } };
+export type WorkspaceService = { id: string; name: string; type: string; url: string; description?: string; icon?: string };
 
 export type WorkspaceNavigation = {
   schemaVersion: 1;
@@ -22,6 +38,7 @@ export type WorkspaceNavigation = {
   welcomePage?: { enabled: boolean; title: string; description: string; showDashboard: boolean };
   installations: { id: string; appId: string; releaseId: string; basePath: string; settings: { schemaId: string; value: Record<string, unknown> } }[];
   routes: { id: string; installationId: string; path: string }[];
+  services?: WorkspaceService[];
   menus: { id: string; name: string; entries: NavigationEntry[] }[];
   menuPlacements: { menuId: string; region: "top" | "left" | "right" | "bottom"; renderer: "tree" | "rail" | "horizontal" | "drawer"; breakpoint?: "mobile" | "tablet" | "desktop" }[];
   shell?: {

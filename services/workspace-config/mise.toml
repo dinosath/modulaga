@@ -126,3 +126,15 @@ run = [
     { task = "docker-build" },
     { tasks = ["docker-push","helm-push"] },
 ]
+[tasks.dev]
+description = "Run the workspace configuration backend service"
+run = '''
+mkdir -p ../../.data
+AUTH_MODE=disabled WORKSPACE_STORE=sqlite DATABASE_URL="sqlite://../../.data/workspace-config.sqlite?mode=rwc" cargo run --bin workspace-config
+'''
+
+[tasks.catalog]
+description = "Run the application catalog backend service"
+run = '''
+CATALOG_PATH="../../fixtures/catalog.local.json" CATALOG_BIND_ADDRESS=127.0.0.1:4304 cargo run --bin app-catalog
+'''

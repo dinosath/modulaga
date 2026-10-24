@@ -31,7 +31,7 @@ const MAX_CONFIG_BYTES: usize = 1_048_576;
 const JWKS_TTL: Duration = Duration::from_secs(300);
 
 pub(crate) fn migrate_admin_panel_paths(config: &mut Value, seed: &Value) -> bool {
-    fn find_path(entries: &[Value]) -> Option<String> {
+    fn find_legacy_path(entries: &[Value]) -> Option<String> {
         for entry in entries {
             if entry.get("type").and_then(Value::as_str) == Some("action")
                 && entry.get("action").and_then(Value::as_str) == Some("admin-panel")
@@ -41,7 +41,7 @@ pub(crate) fn migrate_admin_panel_paths(config: &mut Value, seed: &Value) -> boo
                 }
             }
             if let Some(children) = entry.get("children").and_then(Value::as_array) {
-                if let Some(path) = find_path(children) {
+                if let Some(path) = find_legacy_path(children) {
                     return Some(path);
                 }
             }
@@ -49,7 +49,7 @@ pub(crate) fn migrate_admin_panel_paths(config: &mut Value, seed: &Value) -> boo
         None
     }
 
-    fn update_entries(entries: &mut [Value], path: &str) -> bool {
+    fn update_legacy_entries(entries: &mut [Value], path: &str) -> bool {
         let mut changed = false;
         for entry in entries {
             let is_admin_panel = entry.get("type").and_then(Value::as_str) == Some("action")
@@ -59,36 +59,154 @@ pub(crate) fn migrate_admin_panel_paths(config: &mut Value, seed: &Value) -> boo
                 changed = true;
             }
             if let Some(children) = entry.get_mut("children").and_then(Value::as_array_mut) {
-                changed |= update_entries(children, path);
+                changed |= update_legacy_entries(children, path);
             }
         }
         changed
     }
 
-    let Some(path) = seed
-        .get("menus")
-        .and_then(Value::as_array)
-        .and_then(|menus| {
-            menus.iter().find_map(|menu| {
-                menu.get("entries")
-                    .and_then(Value::as_array)
-                    .and_then(|entries| find_path(entries))
+    let target_path = seed
+        .get("shell")
+        .and_then(|shell| shell.get("sidebar"))
+        .and_then(|sidebar| sidebar.get("adminMenuSettingsPath"))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .or_else(|| {
+            seed.get("menus").and_then(Value::as_array).and_then(|menus| {
+                menus.iter().find_map(|menu| {
+                    menu.get("entries")
+                        .and_then(Value::as_array)
+                        .and_then(|entries| find_legacy_path(entries))
+                })
             })
-        })
-    else {
+        });
+    let Some(target_path) = target_path else {
         return false;
     };
 
-    config
-        .get_mut("menus")
-        .and_then(Value::as_array_mut)
-        .map(|menus| {
-            menus.iter_mut().fold(false, |changed, menu| {
-                let entries = menu.get_mut("entries").and_then(Value::as_array_mut);
-                changed | entries.is_some_and(|entries| update_entries(entries, &path))
-            })
-        })
-        .unwrap_or(false)
+    let mut changed = false;
+    if let Some(sidebar) = config.get_mut("shell").and_then(|shell| shell.get_mut("sidebar")) {
+        if sidebar.get("adminMenuSettingsPath").and_then(Value::as_str) != Some(&target_path) {
+            sidebar["adminMenuSettingsPath"] = Value::String(target_path.clone());
+            changed = true;
+        }
+    }
+    if let Some(routes) = config.get_mut("routes").and_then(Value::as_array_mut) {
+        let before = routes.len();
+        routes.retain(|route| {
+            route.get("id").and_then(Value::as_str) != Some("admin-panel-settings")
+                && !(route.get("installationId").and_then(Value::as_str)
+                    == Some("admin-panel-installation")
+                    && route.get("path").and_then(Value::as_str) == Some("/settings/admin-panel"))
+        });
+        changed |= routes.len() != before;
+    }
+    if let Some(menus) = config.get_mut("menus").and_then(Value::as_array_mut) {
+        for menu in menus {
+            if let Some(entries) = menu.get_mut("entries").and_then(Value::as_array_mut) {
+                changed |= update_legacy_entries(entries, &target_path);
+            }
+        }
+    }
+    changed
+}
+
+/// Add new seed-owned installations, routes, and menu nodes without replacing
+/// labels, ordering, or custom entries already stored in a workspace.
+pub(crate) fn merge_seed_defaults(config: &mut Value, seed: &Value) -> bool {
+    fn merge_identified_array(target: &mut Value, source: &Value, key: &str) -> bool {
+        let Some(source_items) = source.get(key).and_then(Value::as_array) else {
+            return false;
+        };
+        let Some(target_object) = target.as_object_mut() else {
+            return false;
+        };
+        let target_items = target_object.entry(key).or_insert_with(|| Value::Array(Vec::new()));
+        let Some(target_items) = target_items.as_array_mut() else {
+            return false;
+        };
+        let mut changed = false;
+        for source_item in source_items {
+            let source_id = source_item.get("id").and_then(Value::as_str);
+            let existing = source_id.and_then(|id| {
+                target_items
+                    .iter_mut()
+                    .find(|item| item.get("id").and_then(Value::as_str) == Some(id))
+            });
+            if existing.is_none() {
+                target_items.push(source_item.clone());
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    fn merge_entries(target: &mut Value, source: &Value) -> bool {
+        let Some(source_items) = source.as_array() else {
+            return false;
+        };
+        let Some(target_items) = target.as_array_mut() else {
+            return false;
+        };
+        let mut changed = false;
+        for source_item in source_items {
+            let source_id = source_item.get("id").and_then(Value::as_str);
+            let existing = source_id.and_then(|id| {
+                target_items
+                    .iter_mut()
+                    .find(|item| item.get("id").and_then(Value::as_str) == Some(id))
+            });
+            if let Some(existing) = existing {
+                if let Some(source_children) = source_item.get("children") {
+                    let children = existing.as_object_mut().map(|object| {
+                        object.entry("children").or_insert_with(|| Value::Array(Vec::new()))
+                    });
+                    if let Some(children) = children {
+                        changed |= merge_entries(children, source_children);
+                    }
+                }
+            } else {
+                target_items.push(source_item.clone());
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    let mut changed = false;
+    for key in ["installations", "routes", "services"] {
+        changed |= merge_identified_array(config, seed, key);
+    }
+    let Some(seed_menus) = seed.get("menus").and_then(Value::as_array) else {
+        return changed;
+    };
+    let Some(config_object) = config.as_object_mut() else {
+        return changed;
+    };
+    let config_menus = config_object.entry("menus").or_insert_with(|| Value::Array(Vec::new()));
+    let Some(config_menus) = config_menus.as_array_mut() else {
+        return changed;
+    };
+    for seed_menu in seed_menus {
+        let seed_id = seed_menu.get("id").and_then(Value::as_str);
+        let current = seed_id.and_then(|id| {
+            config_menus.iter_mut().find(|menu| menu.get("id").and_then(Value::as_str) == Some(id))
+        });
+        if let Some(current) = current {
+            if let Some(seed_entries) = seed_menu.get("entries") {
+                let entries = current.as_object_mut().map(|object| {
+                    object.entry("entries").or_insert_with(|| Value::Array(Vec::new()))
+                });
+                if let Some(entries) = entries {
+                    changed |= merge_entries(entries, seed_entries);
+                }
+            }
+        } else {
+            config_menus.push(seed_menu.clone());
+            changed = true;
+        }
+    }
+    changed
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -109,10 +227,7 @@ pub enum StoreError {
 pub trait WorkspaceStore: Send + Sync {
     async fn get(&self, workspace_id: &str) -> Result<WorkspaceConfigRecord, StoreError>;
     async fn update(
-        &self,
-        workspace_id: &str,
-        expected_revision: u64,
-        config: Value,
+        &self, workspace_id: &str, expected_revision: u64, config: Value,
     ) -> Result<WorkspaceConfigRecord, StoreError>;
 }
 
@@ -123,28 +238,18 @@ pub struct MemoryWorkspaceStore {
 
 impl MemoryWorkspaceStore {
     pub fn with_record(record: WorkspaceConfigRecord) -> Self {
-        Self {
-            records: Mutex::new(HashMap::from([(record.workspace_id.clone(), record)])),
-        }
+        Self { records: Mutex::new(HashMap::from([(record.workspace_id.clone(), record)])) }
     }
 }
 
 #[async_trait]
 impl WorkspaceStore for MemoryWorkspaceStore {
     async fn get(&self, workspace_id: &str) -> Result<WorkspaceConfigRecord, StoreError> {
-        self.records
-            .lock()
-            .await
-            .get(workspace_id)
-            .cloned()
-            .ok_or(StoreError::NotFound)
+        self.records.lock().await.get(workspace_id).cloned().ok_or(StoreError::NotFound)
     }
 
     async fn update(
-        &self,
-        workspace_id: &str,
-        expected_revision: u64,
-        config: Value,
+        &self, workspace_id: &str, expected_revision: u64, config: Value,
     ) -> Result<WorkspaceConfigRecord, StoreError> {
         let mut records = self.records.lock().await;
         let current = records.get(workspace_id).ok_or(StoreError::NotFound)?;
@@ -186,42 +291,27 @@ impl ConfigService {
 #[allow(refining_impl_trait)]
 impl WorkspaceConfigService for ConfigService {
     async fn get(
-        &self,
-        _ctx: RequestContext,
-        request: ServiceRequest<'_, GetWorkspaceConfigRequest>,
+        &self, _ctx: RequestContext, request: ServiceRequest<'_, GetWorkspaceConfigRequest>,
     ) -> ServiceResult<WorkspaceConfigResponse> {
         let workspace_id = request.view().workspace_id.trim();
         if !valid_identifier(workspace_id) {
-            return Err(ConnectError::invalid_argument(
-                "workspace_id must be a valid identifier",
-            ));
+            return Err(ConnectError::invalid_argument("workspace_id must be a valid identifier"));
         }
-        let record = self
-            .state
-            .store
-            .get(workspace_id)
-            .await
-            .map_err(store_error)?;
+        let record = self.state.store.get(workspace_id).await.map_err(store_error)?;
         Response::ok(to_response(record)?)
     }
 
     async fn update(
-        &self,
-        ctx: RequestContext,
-        request: ServiceRequest<'_, UpdateWorkspaceConfigRequest>,
+        &self, ctx: RequestContext, request: ServiceRequest<'_, UpdateWorkspaceConfigRequest>,
     ) -> ServiceResult<WorkspaceConfigResponse> {
         self.state.auth.require_admin(ctx.headers()).await?;
         let request = request.view();
         let workspace_id = request.workspace_id.trim();
         if !valid_identifier(workspace_id) {
-            return Err(ConnectError::invalid_argument(
-                "workspace_id must be a valid identifier",
-            ));
+            return Err(ConnectError::invalid_argument("workspace_id must be a valid identifier"));
         }
         if request.config_json.len() > MAX_CONFIG_BYTES {
-            return Err(ConnectError::invalid_argument(
-                "configuration exceeds the 1 MiB limit",
-            ));
+            return Err(ConnectError::invalid_argument("configuration exceeds the 1 MiB limit"));
         }
         let config: Value = serde_json::from_str(&request.config_json)
             .map_err(|_| ConnectError::invalid_argument("config_json must contain valid JSON"))?;
@@ -283,48 +373,31 @@ mod service_tests {
     #[tokio::test]
     async fn get_returns_config_and_reports_bad_or_missing_workspace() {
         let service = ConfigService::new(state());
-        let input = GetWorkspaceConfigRequest {
-            workspace_id: "default".into(),
-            ..Default::default()
-        };
+        let input =
+            GetWorkspaceConfigRequest { workspace_id: "default".into(), ..Default::default() };
         let body = buffa::bytes::Bytes::from(input.encode_to_vec());
         let view = GetWorkspaceConfigRequest::decode_view(&body).unwrap();
         let request = ServiceRequest::from_parts(&view, &body);
-        assert!(
-            service
-                .get(RequestContext::default(), request)
-                .await
-                .is_ok()
-        );
+        assert!(service.get(RequestContext::default(), request).await.is_ok());
 
-        let input = GetWorkspaceConfigRequest {
-            workspace_id: "bad/id".into(),
-            ..Default::default()
-        };
+        let input =
+            GetWorkspaceConfigRequest { workspace_id: "bad/id".into(), ..Default::default() };
         let body = buffa::bytes::Bytes::from(input.encode_to_vec());
         let view = GetWorkspaceConfigRequest::decode_view(&body).unwrap();
         assert!(
             service
-                .get(
-                    RequestContext::default(),
-                    ServiceRequest::from_parts(&view, &body)
-                )
+                .get(RequestContext::default(), ServiceRequest::from_parts(&view, &body))
                 .await
                 .is_err()
         );
 
-        let input = GetWorkspaceConfigRequest {
-            workspace_id: "missing".into(),
-            ..Default::default()
-        };
+        let input =
+            GetWorkspaceConfigRequest { workspace_id: "missing".into(), ..Default::default() };
         let body = buffa::bytes::Bytes::from(input.encode_to_vec());
         let view = GetWorkspaceConfigRequest::decode_view(&body).unwrap();
         assert!(
             service
-                .get(
-                    RequestContext::default(),
-                    ServiceRequest::from_parts(&view, &body)
-                )
+                .get(RequestContext::default(), ServiceRequest::from_parts(&view, &body))
                 .await
                 .is_err()
         );
@@ -344,10 +417,7 @@ mod service_tests {
         let view = UpdateWorkspaceConfigRequest::decode_view(&body).unwrap();
         assert!(
             service
-                .update(
-                    RequestContext::default(),
-                    ServiceRequest::from_parts(&view, &body)
-                )
+                .update(RequestContext::default(), ServiceRequest::from_parts(&view, &body))
                 .await
                 .is_ok()
         );
@@ -362,10 +432,7 @@ mod service_tests {
         let view = UpdateWorkspaceConfigRequest::decode_view(&body).unwrap();
         assert!(
             service
-                .update(
-                    RequestContext::default(),
-                    ServiceRequest::from_parts(&view, &body)
-                )
+                .update(RequestContext::default(), ServiceRequest::from_parts(&view, &body))
                 .await
                 .is_err()
         );
@@ -383,10 +450,7 @@ mod service_tests {
             let view = UpdateWorkspaceConfigRequest::decode_view(&body).unwrap();
             assert!(
                 service
-                    .update(
-                        RequestContext::default(),
-                        ServiceRequest::from_parts(&view, &body)
-                    )
+                    .update(RequestContext::default(), ServiceRequest::from_parts(&view, &body))
                     .await
                     .is_err()
             );
@@ -402,10 +466,7 @@ mod service_tests {
         let view = UpdateWorkspaceConfigRequest::decode_view(&body).unwrap();
         assert!(
             service
-                .update(
-                    RequestContext::default(),
-                    ServiceRequest::from_parts(&view, &body)
-                )
+                .update(RequestContext::default(), ServiceRequest::from_parts(&view, &body))
                 .await
                 .is_err()
         );
@@ -420,10 +481,7 @@ mod service_tests {
         );
         assert!(auth.require_admin(&HeaderMap::new()).await.is_err());
         let mut headers = HeaderMap::new();
-        headers.insert(
-            AUTHORIZATION,
-            HeaderValue::from_static("Basic dXNlcjpwYXNz"),
-        );
+        headers.insert(AUTHORIZATION, HeaderValue::from_static("Basic dXNlcjpwYXNz"));
         assert!(auth.require_admin(&headers).await.is_err());
     }
 
@@ -452,29 +510,19 @@ mod service_tests {
             let claims = serde_json::json!({"iss":token_issuer,"aud":audience,"exp":now + 60,"realm_access":{"roles":roles}});
             let mut header = Header::new(Algorithm::RS256);
             header.kid = Some("test-key".into());
-            encode(
-                &header,
-                &claims,
-                &EncodingKey::from_rsa_pem(TEST_RSA_PRIVATE_KEY).unwrap(),
-            )
-            .unwrap()
+            encode(&header, &claims, &EncodingKey::from_rsa_pem(TEST_RSA_PRIVATE_KEY).unwrap())
+                .unwrap()
         };
         let headers_for = |token: String| {
             let mut headers = HeaderMap::new();
-            headers.insert(
-                AUTHORIZATION,
-                HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
-            );
+            headers
+                .insert(AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {token}")).unwrap());
             headers
         };
 
         assert!(
             authenticator
-                .require_admin(&headers_for(token(
-                    "modulaga-api",
-                    &["modulaga-admin"],
-                    issuer
-                )))
+                .require_admin(&headers_for(token("modulaga-api", &["modulaga-admin"], issuer)))
                 .await
                 .is_ok()
         );
@@ -486,11 +534,7 @@ mod service_tests {
         );
         assert!(
             authenticator
-                .require_admin(&headers_for(token(
-                    "another-api",
-                    &["modulaga-admin"],
-                    issuer
-                )))
+                .require_admin(&headers_for(token("another-api", &["modulaga-admin"], issuer)))
                 .await
                 .is_err()
         );
@@ -508,10 +552,8 @@ mod service_tests {
             headers_for(token("modulaga-api", &["modulaga-admin"], issuer));
         let mut unknown_key = Header::new(Algorithm::RS256);
         unknown_key.kid = Some("missing-key".into());
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let now =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
         let claims = serde_json::json!({"iss":issuer,"aud":"modulaga-api","exp":now + 60,"realm_access":{"roles":["modulaga-admin"]}});
         unknown_key_header.insert(
             AUTHORIZATION,
@@ -526,75 +568,37 @@ mod service_tests {
             ))
             .unwrap(),
         );
-        assert!(
-            authenticator
-                .require_admin(&unknown_key_header)
-                .await
-                .is_err()
-        );
+        assert!(authenticator.require_admin(&unknown_key_header).await.is_err());
 
         let mut no_kid = Header::new(Algorithm::RS256);
         no_kid.kid = None;
-        let no_kid_token = encode(
-            &no_kid,
-            &claims,
-            &EncodingKey::from_rsa_pem(TEST_RSA_PRIVATE_KEY).unwrap(),
-        )
-        .unwrap();
-        assert!(
-            authenticator
-                .require_admin(&headers_for(no_kid_token))
-                .await
-                .is_err()
-        );
+        let no_kid_token =
+            encode(&no_kid, &claims, &EncodingKey::from_rsa_pem(TEST_RSA_PRIVATE_KEY).unwrap())
+                .unwrap();
+        assert!(authenticator.require_admin(&headers_for(no_kid_token)).await.is_err());
         let mut wrong_algorithm = Header::new(Algorithm::HS256);
         wrong_algorithm.kid = Some("test-key".into());
-        let wrong_algorithm_token = encode(
-            &wrong_algorithm,
-            &claims,
-            &EncodingKey::from_secret(b"test-secret"),
-        )
-        .unwrap();
-        assert!(
-            authenticator
-                .require_admin(&headers_for(wrong_algorithm_token))
-                .await
-                .is_err()
-        );
-        assert!(
-            authenticator
-                .require_admin(&headers_for("not-a-jwt".into()))
-                .await
-                .is_err()
-        );
-        assert!(
-            authenticator
-                .require_admin(&headers_for(String::new()))
-                .await
-                .is_err()
-        );
+        let wrong_algorithm_token =
+            encode(&wrong_algorithm, &claims, &EncodingKey::from_secret(b"test-secret")).unwrap();
+        assert!(authenticator.require_admin(&headers_for(wrong_algorithm_token)).await.is_err());
+        assert!(authenticator.require_admin(&headers_for("not-a-jwt".into())).await.is_err());
+        assert!(authenticator.require_admin(&headers_for(String::new())).await.is_err());
     }
 }
 
 fn valid_identifier(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 80
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || b"-_".contains(&byte))
+        && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"-_".contains(&byte))
 }
 
 pub fn validate_workspace_config(config: &Value) -> Result<(), String> {
-    let root = config
-        .as_object()
-        .ok_or("configuration must be an object")?;
+    let root = config.as_object().ok_or("configuration must be an object")?;
     if root.get("schemaVersion").and_then(Value::as_u64) != Some(1) {
         return Err("schemaVersion must be 1".into());
     }
-    let workspace = root
-        .get("workspace")
-        .and_then(Value::as_object)
-        .ok_or("workspace must be an object")?;
+    let workspace =
+        root.get("workspace").and_then(Value::as_object).ok_or("workspace must be an object")?;
     if !valid_identifier(workspace.get("id").and_then(Value::as_str).unwrap_or("")) {
         return Err("workspace.id is invalid".into());
     }
@@ -607,9 +611,7 @@ pub fn validate_workspace_config(config: &Value) -> Result<(), String> {
         return Err("workspace.name must contain 1 to 80 characters".into());
     }
     if let Some(welcome) = root.get("welcomePage") {
-        let welcome = welcome
-            .as_object()
-            .ok_or("welcomePage must be an object")?;
+        let welcome = welcome.as_object().ok_or("welcomePage must be an object")?;
         if welcome.get("enabled").and_then(Value::as_bool).is_none() {
             return Err("welcomePage.enabled must be a boolean".into());
         }
@@ -633,6 +635,44 @@ pub fn validate_workspace_config(config: &Value) -> Result<(), String> {
             return Err("welcomePage.showDashboard must be a boolean".into());
         }
     }
+    if let Some(services) = root.get("services") {
+        let services = services.as_array().ok_or("services must be an array")?;
+        let mut service_ids = std::collections::HashSet::new();
+        for service in services {
+            let id = service.get("id").and_then(Value::as_str).ok_or("each service needs an id")?;
+            let name =
+                service.get("name").and_then(Value::as_str).ok_or("each service needs a name")?;
+            let kind =
+                service.get("type").and_then(Value::as_str).ok_or("each service needs a type")?;
+            let url =
+                service.get("url").and_then(Value::as_str).ok_or("each service needs a URL")?;
+            if !valid_identifier(id) || !service_ids.insert(id) {
+                return Err("service IDs must be valid and unique".into());
+            }
+            if name.trim().is_empty() || name.chars().count() > 120 {
+                return Err("service names must contain 1 to 120 characters".into());
+            }
+            if kind.trim().is_empty() || kind.chars().count() > 80 {
+                return Err("service types must contain 1 to 80 characters".into());
+            }
+            if !(url.starts_with("http://") || url.starts_with("https://")) || url.len() > 2048 {
+                return Err(
+                    "service URLs must use HTTP or HTTPS and be at most 2048 characters".into()
+                );
+            }
+            if service.get("description").is_some_and(|description| {
+                description.as_str().is_none_or(|text| text.chars().count() > 500)
+            }) {
+                return Err("service descriptions must be strings up to 500 characters".into());
+            }
+            if service
+                .get("icon")
+                .is_some_and(|icon| icon.as_str().is_none_or(|text| text.chars().count() > 80))
+            {
+                return Err("service icons must be strings up to 80 characters".into());
+            }
+        }
+    }
     let installations = root
         .get("installations")
         .and_then(Value::as_array)
@@ -647,21 +687,12 @@ pub fn validate_workspace_config(config: &Value) -> Result<(), String> {
             return Err("installation IDs must be valid and unique".into());
         }
     }
-    let routes = root
-        .get("routes")
-        .and_then(Value::as_array)
-        .ok_or("routes must be an array")?;
+    let routes = root.get("routes").and_then(Value::as_array).ok_or("routes must be an array")?;
     let mut route_ids = std::collections::HashSet::new();
     let mut route_paths = std::collections::HashSet::new();
     for route in routes {
-        let id = route
-            .get("id")
-            .and_then(Value::as_str)
-            .ok_or("each route needs an id")?;
-        let path = route
-            .get("path")
-            .and_then(Value::as_str)
-            .ok_or("each route needs a path")?;
+        let id = route.get("id").and_then(Value::as_str).ok_or("each route needs an id")?;
+        let path = route.get("path").and_then(Value::as_str).ok_or("each route needs a path")?;
         if !valid_identifier(id) || !route_ids.insert(id) {
             return Err("route IDs must be valid and unique".into());
         }
@@ -671,35 +702,24 @@ pub fn validate_workspace_config(config: &Value) -> Result<(), String> {
             || !route_paths.insert(path)
         {
             return Err(
-                "route paths must be unique absolute paths without query or fragment".into(),
+                "route paths must be unique absolute paths without query or fragment".into()
             );
         }
-        if !installation_ids.contains(
-            route
-                .get("installationId")
-                .and_then(Value::as_str)
-                .unwrap_or(""),
-        ) {
+        if !installation_ids
+            .contains(route.get("installationId").and_then(Value::as_str).unwrap_or(""))
+        {
             return Err("route references an unknown installation".into());
         }
     }
-    let menus = root
-        .get("menus")
-        .and_then(Value::as_array)
-        .ok_or("menus must be an array")?;
+    let menus = root.get("menus").and_then(Value::as_array).ok_or("menus must be an array")?;
     let mut menu_ids = std::collections::HashSet::new();
     for menu in menus {
-        let id = menu
-            .get("id")
-            .and_then(Value::as_str)
-            .ok_or("each menu needs an id")?;
+        let id = menu.get("id").and_then(Value::as_str).ok_or("each menu needs an id")?;
         if !valid_identifier(id) || !menu_ids.insert(id) {
             return Err("menu IDs must be valid and unique".into());
         }
-        let entries = menu
-            .get("entries")
-            .and_then(Value::as_array)
-            .ok_or("menu entries must be an array")?;
+        let entries =
+            menu.get("entries").and_then(Value::as_array).ok_or("menu entries must be an array")?;
         let mut entry_ids = std::collections::HashSet::new();
         validate_entries(entries, &route_ids, 0, &mut entry_ids)?;
     }
@@ -708,12 +728,7 @@ pub fn validate_workspace_config(config: &Value) -> Result<(), String> {
         .and_then(Value::as_array)
         .ok_or("menuPlacements must be an array")?;
     for placement in placements {
-        if !menu_ids.contains(
-            placement
-                .get("menuId")
-                .and_then(Value::as_str)
-                .unwrap_or(""),
-        ) {
+        if !menu_ids.contains(placement.get("menuId").and_then(Value::as_str).unwrap_or("")) {
             return Err("menu placement references an unknown menu".into());
         }
         if !matches!(
@@ -729,19 +744,16 @@ pub fn validate_workspace_config(config: &Value) -> Result<(), String> {
 }
 
 fn validate_entries(
-    entries: &[Value],
-    route_ids: &std::collections::HashSet<&str>,
-    depth: usize,
+    entries: &[Value], route_ids: &std::collections::HashSet<&str>, depth: usize,
     entry_ids: &mut std::collections::HashSet<String>,
 ) -> Result<(), String> {
     if depth > 8 {
         return Err("menu nesting may not exceed eight levels".into());
     }
     for entry in entries {
-        let id = entry
-            .get("id")
-            .and_then(Value::as_str)
-            .ok_or("each menu entry needs an id")?;
+        let id = entry.get("id").and_then(Value::as_str).ok_or("each menu entry needs an id")?;
+        validate_menu_item_buttons(entry)?;
+        validate_menu_item_button_actions(entry)?;
         if !valid_identifier(id) || !entry_ids.insert(id.to_owned()) {
             return Err("menu entry IDs must be valid and unique within each menu".into());
         }
@@ -789,20 +801,66 @@ fn validate_entries(
                     );
                 }
             }
-            Some("action") if entry.get("action").and_then(Value::as_str) == Some("admin-panel") => {
+            Some("action")
+                if entry.get("action").and_then(Value::as_str) == Some("admin-panel") =>
+            {
                 let path = entry
                     .get("path")
                     .and_then(Value::as_str)
                     .ok_or("admin panel actions need a path")?;
-                if !path.starts_with('/')
-                    || path.starts_with("//")
-                    || path.contains(['?', '#'])
-                {
-                    return Err("admin panel paths must be absolute paths without query or fragment".into());
+                if !path.starts_with('/') || path.starts_with("//") || path.contains(['?', '#']) {
+                    return Err(
+                        "admin panel paths must be absolute paths without query or fragment".into(),
+                    );
                 }
             }
             Some("action") => return Err("menu action is unsupported".into()),
-            _ => return Err("menu entry type must be section, group, route, external, or action".into()),
+            _ => {
+                return Err(
+                    "menu entry type must be section, group, route, external, or action".into()
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_menu_item_buttons(entry: &Value) -> Result<(), String> {
+    let Some(buttons) = entry.get("buttons") else { return Ok(()) };
+    let buttons = buttons.as_object().ok_or("menu entry buttons must be an object")?;
+    for (name, value) in buttons {
+        if !matches!(name.as_str(), "edit" | "visibility" | "delete" | "options" | "add" | "moveUp" | "moveDown" | "moveTo") {
+            return Err(format!("menu entry button setting {name} is unsupported"));
+        }
+        if value.as_bool().is_none() {
+            return Err(format!("menu entry button setting {name} must be a boolean"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_menu_item_button_actions(entry: &Value) -> Result<(), String> {
+    let Some(actions) = entry.get("buttonActions") else { return Ok(()) };
+    let actions = actions.as_object().ok_or("menu entry buttonActions must be an object")?;
+    for (button, binding) in actions {
+        if !matches!(button.as_str(), "edit" | "visibility" | "delete" | "add" | "moveUp" | "moveDown" | "moveTo") {
+            return Err(format!("menu entry button action {button} is unsupported"));
+        }
+        let binding = binding.as_object().ok_or("menu entry button binding must be an object")?;
+        match binding.get("type").and_then(Value::as_str) {
+            Some("client") => {
+                for field in ["clientId", "actionId"] {
+                    if binding.get(field).and_then(Value::as_str).is_none_or(|value| !valid_identifier(value)) {
+                        return Err(format!("menu entry client button binding needs a valid {field}"));
+                    }
+                }
+            }
+            Some("component") => {
+                if binding.get("componentId").and_then(Value::as_str).is_none_or(|value| !valid_identifier(value)) {
+                    return Err("menu entry component button binding needs a valid componentId".into());
+                }
+            }
+            _ => return Err("menu entry button binding type must be client or component".into()),
         }
     }
     Ok(())
@@ -810,10 +868,8 @@ fn validate_entries(
 
 fn validate_shell(shell: Option<&Value>) -> Result<(), String> {
     let Some(shell) = shell else { return Ok(()) };
-    let sidebar = shell
-        .get("sidebar")
-        .and_then(Value::as_object)
-        .ok_or("shell.sidebar must be an object")?;
+    let sidebar =
+        shell.get("sidebar").and_then(Value::as_object).ok_or("shell.sidebar must be an object")?;
     let width = sidebar
         .get("width")
         .and_then(Value::as_u64)
@@ -821,16 +877,11 @@ fn validate_shell(shell: Option<&Value>) -> Result<(), String> {
     if !(200..=360).contains(&width) {
         return Err("shell.sidebar.width must be between 200 and 360 pixels".into());
     }
-    if !matches!(
-        sidebar.get("mode").and_then(Value::as_str),
-        Some("fixed" | "collapsible")
-    ) {
+    if !matches!(sidebar.get("mode").and_then(Value::as_str), Some("fixed" | "collapsible")) {
         return Err("shell.sidebar.mode must be fixed or collapsible".into());
     }
     if let Some(path) = sidebar.get("adminMenuSettingsPath") {
-        let path = path
-            .as_str()
-            .ok_or("shell.sidebar.adminMenuSettingsPath must be a string")?;
+        let path = path.as_str().ok_or("shell.sidebar.adminMenuSettingsPath must be a string")?;
         if path.is_empty()
             || path.len() > 256
             || !path.starts_with('/')
@@ -844,11 +895,7 @@ fn validate_shell(shell: Option<&Value>) -> Result<(), String> {
         .get("breadcrumbs")
         .and_then(Value::as_object)
         .ok_or("shell.breadcrumbs must be an object")?;
-    if breadcrumbs
-        .get("enabled")
-        .and_then(Value::as_bool)
-        .is_none()
-    {
+    if breadcrumbs.get("enabled").and_then(Value::as_bool).is_none() {
         return Err("shell.breadcrumbs.enabled must be boolean".into());
     }
     if breadcrumbs
@@ -862,8 +909,7 @@ fn validate_shell(shell: Option<&Value>) -> Result<(), String> {
 }
 
 fn validate_dashboards(
-    dashboards: Option<&Value>,
-    route_ids: &std::collections::HashSet<&str>,
+    dashboards: Option<&Value>, route_ids: &std::collections::HashSet<&str>,
     installation_ids: &std::collections::HashSet<&str>,
 ) -> Result<(), String> {
     let Some(dashboards) = dashboards else {
@@ -872,19 +918,11 @@ fn validate_dashboards(
     let dashboards = dashboards.as_array().ok_or("dashboards must be an array")?;
     let mut ids = std::collections::HashSet::new();
     for dashboard in dashboards {
-        let id = dashboard
-            .get("id")
-            .and_then(Value::as_str)
-            .ok_or("each dashboard needs an id")?;
+        let id = dashboard.get("id").and_then(Value::as_str).ok_or("each dashboard needs an id")?;
         if !valid_identifier(id) || !ids.insert(id) {
             return Err("dashboard IDs must be valid and unique".into());
         }
-        if !route_ids.contains(
-            dashboard
-                .get("routeId")
-                .and_then(Value::as_str)
-                .unwrap_or(""),
-        ) {
+        if !route_ids.contains(dashboard.get("routeId").and_then(Value::as_str).unwrap_or("")) {
             return Err("dashboard references an unknown route".into());
         }
         if dashboard
@@ -907,12 +945,9 @@ fn validate_dashboards(
             if !valid_identifier(widget_id) || !widget_ids.insert(widget_id) {
                 return Err("dashboard widget IDs must be valid and unique".into());
             }
-            if !installation_ids.contains(
-                widget
-                    .get("installationId")
-                    .and_then(Value::as_str)
-                    .unwrap_or(""),
-            ) {
+            if !installation_ids
+                .contains(widget.get("installationId").and_then(Value::as_str).unwrap_or(""))
+            {
                 return Err("dashboard widget references an unknown installation".into());
             }
             if widget
@@ -968,11 +1003,8 @@ impl Authenticator {
         Self::oidc_with_endpoints(issuer, audience, admin_role, None, None)
     }
     pub fn oidc_with_endpoints(
-        issuer: String,
-        audience: Option<String>,
-        admin_role: String,
-        discovery_url: Option<String>,
-        jwks_uri: Option<String>,
+        issuer: String, audience: Option<String>, admin_role: String,
+        discovery_url: Option<String>, jwks_uri: Option<String>,
     ) -> Self {
         Self {
             issuer: Some(issuer.trim_end_matches('/').to_owned()),
@@ -988,10 +1020,8 @@ impl Authenticator {
         let Some(issuer) = &self.issuer else {
             return Ok(());
         };
-        let raw = headers
-            .get(AUTHORIZATION)
-            .and_then(|value| value.to_str().ok())
-            .ok_or_else(|| {
+        let raw =
+            headers.get(AUTHORIZATION).and_then(|value| value.to_str().ok()).ok_or_else(|| {
                 ConnectError::unauthenticated("a Ferriskey bearer access token is required")
             })?;
         let token = raw.strip_prefix("Bearer ").ok_or_else(|| {
@@ -1006,9 +1036,7 @@ impl Authenticator {
             .kid
             .ok_or_else(|| ConnectError::unauthenticated("bearer token has no signing key id"))?;
         if header.alg != Algorithm::RS256 {
-            return Err(ConnectError::unauthenticated(
-                "token signing algorithm is not allowed",
-            ));
+            return Err(ConnectError::unauthenticated("token signing algorithm is not allowed"));
         }
         let (key_set, discovered_issuer) = self
             .key_set(issuer)
@@ -1032,9 +1060,7 @@ impl Authenticator {
         let data = decode::<TokenClaims>(token, &key, &validation)
             .map_err(|_| ConnectError::unauthenticated("bearer token validation failed"))?;
         if !data.claims.has_role(&self.admin_role) {
-            return Err(ConnectError::permission_denied(
-                "Ferriskey admin role is required",
-            ));
+            return Err(ConnectError::permission_denied("Ferriskey admin role is required"));
         }
         Ok(())
     }
@@ -1054,23 +1080,10 @@ impl Authenticator {
             .discovery_url
             .clone()
             .unwrap_or_else(|| format!("{issuer}/.well-known/openid-configuration"));
-        let discovery: OidcDiscovery = self
-            .client
-            .get(discovery_url)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
+        let discovery: OidcDiscovery =
+            self.client.get(discovery_url).send().await?.error_for_status()?.json().await?;
         let jwks_uri = self.jwks_uri.clone().unwrap_or(discovery.jwks_uri);
-        let keys = self
-            .client
-            .get(jwks_uri)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
+        let keys = self.client.get(jwks_uri).send().await?.error_for_status()?.json().await?;
         *cache = Some((Instant::now(), keys, discovery.issuer.clone()));
         Ok((cache.as_ref().unwrap().1.clone(), discovery.issuer))
     }
@@ -1124,17 +1137,28 @@ mod tests {
         assert_eq!(validate_workspace_config(&fixture()), Ok(()));
     }
     #[test]
+    fn validates_menu_button_client_and_component_bindings() {
+        let mut config = fixture();
+        config["menus"][0]["entries"][0]["buttonActions"] = serde_json::json!({
+            "edit":{"type":"component","componentId":"menu-item-editor"},
+            "visibility":{"type":"client","clientId":"workspace-menu","actionId":"visibility"}
+        });
+        assert_eq!(validate_workspace_config(&config), Ok(()));
+        config["menus"][0]["entries"][0]["buttonActions"]["edit"]["componentId"] = "bad/id".into();
+        assert!(validate_workspace_config(&config).unwrap_err().contains("componentId"));
+        config["menus"][0]["entries"][0]["buttonActions"]["edit"] = serde_json::json!({"type":"remote"});
+        assert!(validate_workspace_config(&config).unwrap_err().contains("type must be client or component"));
+    }
+    #[test]
     fn validates_welcome_page_settings() {
         let mut config = fixture();
         config["welcomePage"]["title"] = " ".into();
-        assert!(validate_workspace_config(&config)
-            .unwrap_err()
-            .contains("welcomePage.title"));
+        assert!(validate_workspace_config(&config).unwrap_err().contains("welcomePage.title"));
         config["welcomePage"]["title"] = "Welcome".into();
         config["welcomePage"]["showDashboard"] = "yes".into();
-        assert!(validate_workspace_config(&config)
-            .unwrap_err()
-            .contains("welcomePage.showDashboard"));
+        assert!(
+            validate_workspace_config(&config).unwrap_err().contains("welcomePage.showDashboard")
+        );
     }
     #[test]
     fn rejects_non_object_and_unknown_schema_version() {
@@ -1144,26 +1168,16 @@ mod tests {
         );
         let mut value = fixture();
         value["schemaVersion"] = 2.into();
-        assert_eq!(
-            validate_workspace_config(&value),
-            Err("schemaVersion must be 1".into())
-        );
+        assert_eq!(validate_workspace_config(&value), Err("schemaVersion must be 1".into()));
     }
     #[test]
     fn rejects_invalid_workspace_identity_and_name() {
         let mut value = fixture();
         value["workspace"]["id"] = "invalid/id".into();
-        assert_eq!(
-            validate_workspace_config(&value),
-            Err("workspace.id is invalid".into())
-        );
+        assert_eq!(validate_workspace_config(&value), Err("workspace.id is invalid".into()));
         let mut value = fixture();
         value["workspace"]["name"] = "".into();
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("workspace.name")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("workspace.name"));
     }
     #[test]
     fn rejects_duplicate_route_ids_and_bad_paths() {
@@ -1172,41 +1186,24 @@ mod tests {
             .as_array_mut()
             .unwrap()
             .push(serde_json::json!({"id":"orders","installationId":"x","path":"/other"}));
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("route IDs")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("route IDs"));
         let mut value = fixture();
         value["routes"][0]["path"] = "//bad".into();
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("route paths")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("route paths"));
     }
     #[test]
     fn validates_menu_types_links_nesting_and_references() {
         let mut value = fixture();
         value["menus"][0]["entries"][0]["children"][0]["routeId"] = "missing".into();
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("unknown route")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("unknown route"));
         let mut value = fixture();
         value["menus"][0]["entries"][0]["children"][0] = serde_json::json!({"id":"external","type":"external","label":"Help","href":"http://unsafe.test"});
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("HTTPS")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("HTTPS"));
         let mut value = fixture();
-        value["menus"][0]["entries"][0] = serde_json::json!({"id":"group","type":"group","label":"Not at root","children":[]});
+        value["menus"][0]["entries"][0] =
+            serde_json::json!({"id":"group","type":"group","label":"Not at root","children":[]});
         assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("inside a section or group")
+            validate_workspace_config(&value).unwrap_err().contains("inside a section or group")
         );
 
         let mut value = fixture();
@@ -1229,176 +1226,91 @@ mod tests {
         assert!(validate_workspace_config(&value).is_ok());
 
         value["menus"][0]["entries"][1]["children"][0]["action"] = "unknown".into();
-        assert_eq!(
-            validate_workspace_config(&value),
-            Err("menu action is unsupported".into())
-        );
+        assert_eq!(validate_workspace_config(&value), Err("menu action is unsupported".into()));
     }
     #[test]
     fn validates_sidebar_breadcrumbs_and_dashboard_bindings() {
         let mut value = fixture();
         value["shell"]["sidebar"]["width"] = 120.into();
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("200 and 360")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("200 and 360"));
         let mut value = fixture();
         value["shell"]["breadcrumbs"]["maxDepth"] = 0.into();
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("maxDepth")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("maxDepth"));
         let mut value = fixture();
         value["dashboards"][0]["routeId"] = "missing".into();
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("unknown route")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("unknown route"));
     }
 
     #[test]
     fn rejects_invalid_installations_routes_menus_and_dashboard_panels() {
         let mut value = fixture();
         let duplicate = value["installations"][0].clone();
-        value["installations"]
-            .as_array_mut()
-            .unwrap()
-            .push(duplicate);
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("installation IDs")
-        );
+        value["installations"].as_array_mut().unwrap().push(duplicate);
+        assert!(validate_workspace_config(&value).unwrap_err().contains("installation IDs"));
 
         let mut value = fixture();
         value["routes"][0]["installationId"] = "missing".into();
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("unknown installation")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("unknown installation"));
 
         let mut value = fixture();
         let duplicate = value["menus"][0].clone();
         value["menus"].as_array_mut().unwrap().push(duplicate);
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("menu IDs")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("menu IDs"));
 
         let mut value = fixture();
         value["menuPlacements"][0]["menuId"] = "missing".into();
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("unknown menu")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("unknown menu"));
 
         let mut value = fixture();
         value["menuPlacements"][0]["region"] = "center".into();
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("region")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("region"));
 
         let mut value = fixture();
         let duplicate = value["menus"][0]["entries"][0].clone();
-        value["menus"][0]["entries"]
-            .as_array_mut()
-            .unwrap()
-            .push(duplicate);
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("menu entry IDs")
-        );
+        value["menus"][0]["entries"].as_array_mut().unwrap().push(duplicate);
+        assert!(validate_workspace_config(&value).unwrap_err().contains("menu entry IDs"));
 
         let mut value = fixture();
         value["menus"][0]["entries"][0]["label"] = "".into();
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("labels")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("labels"));
 
         let mut value = fixture();
         value["menus"][0]["entries"][0]["type"] = "custom".into();
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("type must")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("type must"));
 
         let mut value = fixture();
         value["shell"]["sidebar"]["mode"] = "floating".into();
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("sidebar.mode")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("sidebar.mode"));
 
         let mut value = fixture();
         value["shell"]["breadcrumbs"]["enabled"] = "yes".into();
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("enabled")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("enabled"));
 
         let mut value = fixture();
         value["dashboards"][0]["columns"] = 0.into();
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("columns")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("columns"));
 
         let mut value = fixture();
         let duplicate = value["dashboards"][0].clone();
         value["dashboards"].as_array_mut().unwrap().push(duplicate);
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("dashboard IDs")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("dashboard IDs"));
 
         let widget = serde_json::json!({"id":"panel","installationId":"orders-installation","componentId":"stat-card","settings":{"schemaId":"stat-card","value":{}}});
         let mut value = fixture();
         value["dashboards"][0]["widgets"] = serde_json::json!([widget.clone(), widget]);
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("widget IDs")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("widget IDs"));
 
         let mut value = fixture();
         value["dashboards"][0]["widgets"] = serde_json::json!([{"id":"panel","installationId":"missing","componentId":"stat-card","settings":{"schemaId":"stat-card","value":{}}}]);
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("unknown installation")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("unknown installation"));
 
         let mut value = fixture();
         value["dashboards"][0]["widgets"] = serde_json::json!([{"id":"panel","installationId":"orders-installation","componentId":"bad/id","settings":{"schemaId":"stat-card","value":{}}}]);
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("componentId")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("componentId"));
 
         let mut value = fixture();
         value["dashboards"][0]["widgets"] = serde_json::json!([{"id":"panel","installationId":"orders-installation","componentId":"stat-card","settings":{"schemaId":"stat-card","value":null}}]);
-        assert!(
-            validate_workspace_config(&value)
-                .unwrap_err()
-                .contains("settings need")
-        );
+        assert!(validate_workspace_config(&value).unwrap_err().contains("settings need"));
     }
     #[test]
     fn identifiers_are_bounded_and_ascii_safe() {
@@ -1429,19 +1341,11 @@ mod tests {
         });
         let first = store.update("default", 0, fixture()).await.unwrap();
         assert_eq!(first.revision, 1);
-        assert_eq!(
-            store.update("default", 0, fixture()).await,
-            Err(StoreError::RevisionConflict)
-        );
+        assert_eq!(store.update("default", 0, fixture()).await, Err(StoreError::RevisionConflict));
         assert_eq!(store.get("missing").await, Err(StoreError::NotFound));
     }
     #[tokio::test]
     async fn disabled_auth_allows_local_development_writes() {
-        assert!(
-            Authenticator::disabled()
-                .require_admin(&HeaderMap::new())
-                .await
-                .is_ok()
-        );
+        assert!(Authenticator::disabled().require_admin(&HeaderMap::new()).await.is_ok());
     }
 }

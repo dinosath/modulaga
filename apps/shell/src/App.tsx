@@ -8,10 +8,13 @@ import {
   Box,
   Briefcase,
   ChartNoAxesCombined,
+  Database,
   ChevronDown,
   ChevronRight,
   Download,
   Ellipsis,
+  Eye,
+  EyeOff,
   Grid,
   ListFilter,
   Monitor,
@@ -31,11 +34,10 @@ import {
   UsersRound,
 } from "@lucide/solid";
 import { Dynamic, Portal } from "@solidjs/web";
+import type { MicrofrontendBreadcrumb } from "../../../packages/contracts/src/microfrontend";
 import { getApplicationCatalog, getWorkspaceConfig, updateWorkspaceConfig, type ApplicationCatalog, type ApplicationRelease, type ApplicationCatalogSnapshot } from "./workspace/api";
 import { authConfigured, finishSignIn, getAccessToken, signOut, startSignIn } from "./workspace/auth";
-import NavigationStudio from "../../admin-panel/src/NavigationStudio";
-import { AddMenuItemDialog } from "./components/AddMenuItemDialog";
-import { defaultNavigation, isNavigationContainer, menuEntries, readNavigation, routePath, saveNavigation, type NavigationEntry, type NavigationContainer, type NavigationGroup, type NavigationLink, type WorkspaceNavigation } from "./config/navigation";
+import { defaultMenuItemButtonActions, isNavigationContainer, menuEntries, readNavigation, routePath, saveNavigation, type MenuItemActionKey, type NavigationEntry, type NavigationGroup, type NavigationLink, type WorkspaceNavigation } from "./config/navigation";
 import { mountDeclaredRemote } from "./probe/federation";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
@@ -43,6 +45,7 @@ import { Card } from "./components/ui/card";
 
 const icons: Record<string, LucideIcon> = {
   grid: Grid,
+  database: Database,
   chart: ChartNoAxesCombined,
   bag: ShoppingBag,
   cart: ShoppingCart,
@@ -64,6 +67,9 @@ const icons: Record<string, LucideIcon> = {
   downArrow: ArrowDown,
   right: ArrowRight,
   trash: Trash2,
+  edit: Pencil,
+  eye: Eye,
+  eyeOff: EyeOff,
   panelOpen: PanelLeftOpen,
   panelClose: PanelLeftClose,
   filter: ListFilter,
@@ -94,22 +100,21 @@ const recentOrders = [
 
 export default function App() {
   const [workspaceStatus, setWorkspaceStatus] = createSignal("Loading workspace configuration...");
-  const [revision, setRevision] = createSignal(0);
   const [accessToken, setAccessToken] = createSignal(getAccessToken() ?? "");
+  const [workspaceRevision, setWorkspaceRevision] = createSignal(0);
   const [activeRoute, setActiveRoute] = createSignal<string>();
   const [activeMenuEntryId, setActiveMenuEntryId] = createSignal<string>();
+  const [remoteBreadcrumbs, setRemoteBreadcrumbs] = createSignal<MicrofrontendBreadcrumb[]>([]);
   const [remoteStatus, setRemoteStatus] = createSignal("Choose a configured page from the workspace menu.");
-  const [studioOpen, setStudioOpen] = createSignal(false);
   const [navigation, setNavigation] = createSignal<WorkspaceNavigation>(readNavigation());
   const [catalog, setCatalog] = createSignal<Awaited<ReturnType<typeof getApplicationCatalog>>["catalog"]>();
   const [sidebarCollapsed, setSidebarCollapsed] = createSignal(navigation().shell?.sidebar.defaultCollapsed ?? false);
   const [expandedMenu, setExpandedMenu] = createSignal<Record<string, boolean>>({});
-  const [sidebarOptionsFor, setSidebarOptionsFor] = createSignal<string>();
-  const [sidebarOptionsPosition, setSidebarOptionsPosition] = createSignal<{ top: number; left: number }>({ top: 0, left: 0 });
-  const [sidebarMoveTreeFor, setSidebarMoveTreeFor] = createSignal<string>();
-  const [sidebarAddEntryTo, setSidebarAddEntryTo] = createSignal<string>();
-  const [sidebarEditItemId, setSidebarEditItemId] = createSignal<string>();
-  let remoteContainer!: HTMLDivElement;
+  const [openSidebarOptions, setOpenSidebarOptions] = createSignal<{ id: string; top: number; left: number; maxHeight: number }>();
+  let remoteContainer: HTMLDivElement | undefined;
+  let sidebarElement: HTMLElement | undefined;
+  let sidebarOptionsTrigger: HTMLButtonElement | undefined;
+  let sidebarOptionsPanel: HTMLDivElement | undefined;
   let disposeRemote: (() => void) | undefined;
   let remoteGeneration = 0;
   let catalogLoading: Promise<ApplicationCatalogSnapshot> | undefined;
@@ -122,21 +127,12 @@ export default function App() {
     ]);
     if (workspaceResult.status === "fulfilled") {
       const snapshot = workspaceResult.value;
-      const config = migrateAdminPanelMenuEntry(snapshot.config);
+      const config = snapshot.config;
       setNavigation(config);
-      setRevision(snapshot.revision);
+      setWorkspaceRevision(snapshot.revision);
       setSidebarCollapsed(config.shell?.sidebar.defaultCollapsed ?? false);
       setWorkspaceStatus(`Configuration revision ${snapshot.revision}`);
-      if (config !== snapshot.config) {
-        saveNavigation(config);
-        void updateWorkspaceConfig(config, snapshot.revision, accessToken() || undefined).then((saved) => {
-          setNavigation(saved.config);
-          setRevision(saved.revision);
-          setWorkspaceStatus(`Configuration revision ${saved.revision}`);
-        }).catch((error: unknown) => {
-          setWorkspaceStatus(error instanceof Error ? `Admin menu settings moved locally; configuration sync failed: ${error.message}` : "Admin menu settings moved locally; configuration sync failed.");
-        });
-      }
+
     } else {
       setWorkspaceStatus(`Using bundled configuration · ${workspaceResult.reason instanceof Error ? workspaceResult.reason.message : "API unavailable"}`);
     }
@@ -150,6 +146,15 @@ export default function App() {
     disposeRemote = undefined;
     remoteContainer?.replaceChildren();
     return remoteGeneration;
+  }
+
+  async function waitForRemoteContainer(generation: number) {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      if (generation !== remoteGeneration) return undefined;
+      if (remoteContainer?.isConnected) return remoteContainer;
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    }
+    throw new Error("The application mount container was not ready.");
   }
 
   async function mountRouteRemote(routeId: string, generation: number) {
@@ -173,11 +178,16 @@ export default function App() {
     }
     setRemoteStatus(`Loading ${application.name} ${release.version}…`);
     try {
-      const unmount = await mountDeclaredRemote(application.id, release, remoteContainer, {
+      const container = await waitForRemoteContainer(generation);
+      if (!container || generation !== remoteGeneration) return;
+      const unmount = await mountDeclaredRemote(application.id, release, container, {
         workspaceId: navigation().workspace.id,
         installationId: installation.id,
         routeId: route.id,
         path: route.path,
+        setBreadcrumbs: (items) => {
+          if (generation === remoteGeneration) setRemoteBreadcrumbs(items);
+        },
       }, () => generation === remoteGeneration);
       if (generation !== remoteGeneration) {
         unmount();
@@ -194,17 +204,10 @@ export default function App() {
 
   function clearActiveApplication() {
     clearRemote();
+    setRemoteBreadcrumbs([]);
     setActiveRoute(undefined);
     setActiveMenuEntryId(undefined);
-    setStudioOpen(false);
     setRemoteStatus("Choose a configured page from the workspace menu.");
-  }
-
-  function closeSidebarOptionsOnOutsideClick(event: PointerEvent) {
-    const target = event.target;
-    if (target instanceof Element && target.closest("[data-sidebar-options-root]")) return;
-    setSidebarOptionsFor(undefined);
-    setSidebarMoveTreeFor(undefined);
   }
 
   function openRoute(routeId: string, updateHistory = true, menuEntryId?: string) {
@@ -212,21 +215,14 @@ export default function App() {
     if (!route) return;
     setActiveMenuEntryId(menuEntryId ?? findRouteMenuEntryId(routeId));
     const generation = clearRemote();
-    setStudioOpen(false);
+    setRemoteBreadcrumbs([]);
     setActiveRoute(routeId);
-    setRemoteStatus(`Resolving the application for ${route.path}…`);
+    setRemoteStatus("Resolving application…");
     if (updateHistory) window.history.pushState({}, "", route.path);
     void mountRouteRemote(routeId, generation);
   }
 
   function openConfiguredLink(link: NavigationLink) {
-    if (link.type === "action" && link.action === "admin-panel") {
-      clearActiveApplication();
-      setActiveMenuEntryId(link.id);
-      setStudioOpen(true);
-      if (window.location.pathname !== link.path) window.history.pushState({}, "", link.path);
-      return;
-    }
     if (link.type === "external") return;
     if (link.type === "route") openRoute(link.routeId, true, link.id);
   }
@@ -252,284 +248,96 @@ export default function App() {
     return expandedMenu()[entry.id] ?? entry.defaultExpanded ?? true;
   }
 
-  function persistMenuEntries(entries: NavigationEntry[]) {
-    const config = {
-      ...navigation(),
-      menus: navigation().menus.map((menu, index) => index === 0 ? { ...menu, entries } : menu),
-    };
-    setNavigation(config);
-    saveNavigation(config);
-    void saveConfiguration(config).catch((error: unknown) => {
-      setWorkspaceStatus(error instanceof Error ? error.message : "Workspace menu could not be saved.");
-    });
-  }
-
-  function findMenuSiblings(id: string, items = menuEntries(navigation())): NavigationEntry[] | undefined {
-    if (items.some((entry) => entry.id === id)) return items;
-    for (const entry of items) {
-      if (!isNavigationContainer(entry)) continue;
-      const nested = findMenuSiblings(id, entry.children);
-      if (nested) return nested;
-    }
-    return undefined;
-  }
-
-  function moveMenuEntry(id: string, direction: -1 | 1) {
-    const move = (items: NavigationEntry[]): NavigationEntry[] => {
-      const index = items.findIndex((entry) => entry.id === id);
-      if (index >= 0) {
-        const nextIndex = index + direction;
-        if (nextIndex < 0 || nextIndex >= items.length) return items;
-        const next = [...items];
-        [next[index], next[nextIndex]] = [next[nextIndex]!, next[index]!];
-        return next;
-      }
-      return items.map((entry) => isNavigationContainer(entry) ? { ...entry, children: move(entry.children) } : entry);
-    };
-    persistMenuEntries(move(menuEntries(navigation())));
-    setSidebarOptionsFor(undefined);
-  }
-
-  function containsMenuEntry(entry: NavigationEntry, id: string): boolean {
-    return entry.id === id || (isNavigationContainer(entry) && entry.children.some((child) => containsMenuEntry(child, id)));
-  }
-
-  function moveMenuGroupTo(groupId: string, destinationId?: string) {
-    const current = menuEntries(navigation());
-    const find = (items: NavigationEntry[]): NavigationEntry | undefined => {
-      for (const entry of items) {
-        if (entry.id === groupId) return entry;
-        if (isNavigationContainer(entry)) {
-          const nested = find(entry.children);
-          if (nested) return nested;
-        }
-      }
-      return undefined;
-    };
-    const source = find(current);
-    if (!source || !isNavigationContainer(source) || (!destinationId && source.type !== "section") || (source.type === "section" && destinationId) || (destinationId && containsMenuEntry(source, destinationId))) return;
-    const remove = (items: NavigationEntry[]): { entry?: NavigationEntry; entries: NavigationEntry[] } => {
-      const index = items.findIndex((entry) => entry.id === groupId);
-      if (index >= 0) {
-        const next = [...items];
-        const [entry] = next.splice(index, 1);
-        return entry ? { entry, entries: next } : { entries: items };
-      }
-      for (let index = 0; index < items.length; index += 1) {
-        const item = items[index]!;
-        if (!isNavigationContainer(item)) continue;
-        const result = remove(item.children);
-        if (result.entry) {
-          const next = [...items];
-          next[index] = { ...item, children: result.entries };
-          return { entry: result.entry, entries: next };
-        }
-      }
-      return { entries: items };
-    };
-    const removed = remove(current);
-    if (!removed.entry || !isNavigationContainer(removed.entry)) return;
-    if (!destinationId) {
-      persistMenuEntries([...removed.entries, removed.entry]);
-    } else {
-      const insert = (items: NavigationEntry[]): NavigationEntry[] => items.map((entry) => {
-        if (entry.id === destinationId && isNavigationContainer(entry)) return { ...entry, children: [...entry.children, removed.entry!] };
-        return isNavigationContainer(entry) ? { ...entry, children: insert(entry.children) } : entry;
-      });
-      persistMenuEntries(insert(removed.entries));
-    }
-    setSidebarOptionsFor(undefined);
-    setSidebarMoveTreeFor(undefined);
-  }
-
-  function removeMenuGroup(id: string) {
-    const remove = (items: NavigationEntry[]): NavigationEntry[] => items.filter((entry) => entry.id !== id).map((entry) => isNavigationContainer(entry) ? { ...entry, children: remove(entry.children) } : entry);
-    persistMenuEntries(remove(menuEntries(navigation())));
-    setSidebarOptionsFor(undefined);
-  }
-
-  function moveMenuEntryTo(entryId: string, destinationId: string) {
-    const current = menuEntries(navigation());
-    const source = findMenuEntry(entryId, current);
-    const destination = findMenuEntry(destinationId, current);
-    if (!source || !destination || !isNavigationContainer(destination) || (isNavigationContainer(source) && containsMenuEntry(source, destinationId))) return;
-    const remove = (items: NavigationEntry[]): { removed?: NavigationEntry; entries: NavigationEntry[] } => {
-      const index = items.findIndex((entry) => entry.id === entryId);
-      if (index >= 0) {
-        const next = [...items];
-        const [removed] = next.splice(index, 1);
-        return removed ? { removed, entries: next } : { entries: items };
-      }
-      for (let index = 0; index < items.length; index += 1) {
-        const entry = items[index]!;
-        if (!isNavigationContainer(entry)) continue;
-        const result = remove(entry.children);
-        if (result.removed) {
-          const next = [...items];
-          next[index] = { ...entry, children: result.entries };
-          return { removed: result.removed, entries: next };
-        }
-      }
-      return { entries: items };
-    };
-    const removed = remove(current);
-    if (!removed.removed) return;
-    const insert = (items: NavigationEntry[]): NavigationEntry[] => items.map((entry) => {
-      if (entry.id === destinationId && isNavigationContainer(entry)) return { ...entry, children: [...entry.children, removed.removed!] };
-      return isNavigationContainer(entry) ? { ...entry, children: insert(entry.children) } : entry;
-    });
-    persistMenuEntries(insert(removed.entries));
-    setSidebarOptionsFor(undefined);
-    setSidebarMoveTreeFor(undefined);
-  }
-
-  function beginSidebarAddEntry(groupId: string) {
-    setSidebarOptionsFor(undefined);
-    setSidebarMoveTreeFor(undefined);
-    setSidebarAddEntryTo(groupId);
-  }
-
-  function closeSidebarAddEntry() {
-    setSidebarAddEntryTo(undefined);
-    setSidebarEditItemId(undefined);
-  }
-
-  function findMenuEntry(id: string, entries = menuEntries(navigation())): NavigationEntry | undefined {
-    for (const entry of entries) {
-      if (entry.id === id) return entry;
-      if (isNavigationContainer(entry)) {
-        const nested = findMenuEntry(id, entry.children);
-        if (nested) return nested;
-      }
-    }
-    return undefined;
-  }
-
-  function findMenuParentId(id: string, entries = menuEntries(navigation())): string | undefined {
-    for (const entry of entries) {
-      if (!isNavigationContainer(entry)) continue;
-      if (entry.children.some((child) => child.id === id)) return entry.id;
-      const nested = findMenuParentId(id, entry.children);
-      if (nested) return nested;
-    }
-    return undefined;
-  }
-
-  function currentSidebarDialog() {
-    const parent = sidebarAddParent();
-    if (parent) return { kind: "create" as const, parent };
-    const id = sidebarEditItemId();
-    const item = id ? findMenuEntry(id) : undefined;
-    return item ? { kind: "edit" as const, item, parentId: findMenuParentId(item.id) } : undefined;
-  }
-
-  function saveSidebarDialogItem(item: NavigationEntry, parentId?: string) {
-    const current = menuEntries(navigation());
-    const existing = findMenuEntry(item.id, current);
-    const replace = (entries: NavigationEntry[]): NavigationEntry[] => entries.map((entry) => entry.id === item.id ? item : isNavigationContainer(entry) ? { ...entry, children: replace(entry.children) } : entry);
-    const updated = existing ? replace(current) : current;
-    if (existing && findMenuParentId(item.id, current) === parentId) {
-      persistMenuEntries(updated);
-      closeSidebarAddEntry();
+  function runMenuAction(entry: NavigationEntry, action: MenuItemActionKey) {
+    const binding = entry.buttonActions?.[action] ?? defaultMenuItemButtonActions[action];
+    if (action === "delete" && binding.type === "client" && binding.clientId === "workspace-menu" && binding.actionId === "delete") {
+      if (!window.confirm(`Delete “${entry.label}” from the workspace menu?`)) return;
+      const removeEntry = (items: NavigationEntry[]): NavigationEntry[] => items
+        .filter((item) => item.id !== entry.id)
+        .map((item) => isNavigationContainer(item) ? { ...item, children: removeEntry(item.children) } : item);
+      const config = navigation();
+      const next = { ...config, menus: config.menus.map((menu, index) => index === 0 ? { ...menu, entries: removeEntry(menu.entries) } : menu) };
+      setOpenSidebarOptions(undefined);
+      void updateWorkspaceConfig(next, workspaceRevision(), accessToken() || undefined).then((snapshot) => {
+        setNavigation(snapshot.config);
+        setWorkspaceRevision(snapshot.revision);
+        saveNavigation(snapshot.config);
+        setWorkspaceStatus(`Configuration revision ${snapshot.revision}`);
+      }).catch((error: unknown) => setWorkspaceStatus(error instanceof Error ? error.message : "The menu item could not be deleted."));
       return;
     }
-    const remove = (entries: NavigationEntry[]): NavigationEntry[] => entries.filter((entry) => entry.id !== item.id).map((entry) => isNavigationContainer(entry) ? { ...entry, children: remove(entry.children) } : entry);
-    const withoutItem = existing ? remove(updated) : updated;
-    const insert = (entries: NavigationEntry[]): NavigationEntry[] => {
-      if (!parentId) return [...entries, item];
-      return entries.map((entry) => entry.id === parentId && isNavigationContainer(entry)
-        ? { ...entry, children: [...entry.children, item] }
-        : isNavigationContainer(entry) ? { ...entry, children: insert(entry.children) } : entry);
-    };
-    persistMenuEntries(insert(withoutItem));
-    closeSidebarAddEntry();
+    const settingsPath = adminMenuSettingsPath();
+    const route = settingsPath && navigation().routes.find((candidate) => candidate.path === settingsPath);
+    if (!route) return;
+    const returnPath = window.location.pathname;
+    const query = new URLSearchParams({ menuAction: action, menuItemId: entry.id, returnPath, bindingType: binding.type });
+    if (binding.type === "client") {
+      query.set("clientId", binding.clientId);
+      query.set("actionId", binding.actionId);
+    } else {
+      query.set("componentId", binding.componentId);
+    }
+    window.history.pushState({}, "", `${route.path}?${query.toString()}`);
+    setOpenSidebarOptions(undefined);
+    openRoute(route.id, false);
   }
 
-  function sidebarAddParent(): NavigationContainer | undefined {
-    const parentId = sidebarAddEntryTo();
-    if (!parentId) return undefined;
-    const find = (items: NavigationEntry[]): NavigationEntry | undefined => {
-      for (const entry of items) {
-        if (entry.id === parentId) return entry;
-        if (isNavigationContainer(entry)) {
-          const found = find(entry.children);
-          if (found) return found;
-        }
-      }
-      return undefined;
-    };
-    const parent = find(menuEntries(navigation()));
-    return parent && isNavigationContainer(parent) ? parent : undefined;
-  }
-
-  function renderSidebarGroupActions(group: NavigationContainer) {
-    const siblings = findMenuSiblings(group.id) ?? [];
-    const position = siblings.findIndex((entry) => entry.id === group.id);
-    const collectMoveTargets = (items: NavigationEntry[], depth = 0): { id: string; label: string; depth: number }[] => items.flatMap((entry) => {
-      if (!isNavigationContainer(entry) || entry.id === group.id || containsMenuEntry(group, entry.id)) return [];
-      return [{ id: entry.id, label: entry.label, depth }, ...collectMoveTargets(entry.children, depth + 1)];
-    });
-    const targets = group.type === "section" ? [] : collectMoveTargets(menuEntries(navigation()));
-    return <Show when={!sidebarCollapsed()}>
-      <div class="group/menu-actions relative ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/menu-item:pointer-events-auto group-hover/menu-item:opacity-100 group-focus-within/menu-item:pointer-events-auto group-focus-within/menu-item:opacity-100 pointer-events-none">
-        <Button type="button" variant="ghost" size="icon" class="size-7 text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-sm" aria-label={`Edit ${group.type} ${group.label}`} title={`Edit ${group.label}`} onClick={(event) => { event.stopPropagation(); setSidebarAddEntryTo(undefined); setSidebarEditItemId(group.id); }}><Pencil class="size-3.5" /></Button>
-        <Button type="button" variant="ghost" size="icon" class="size-7 text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-sm" aria-label={`Add entry to ${group.label}`} title={`Add entry to ${group.label}`} onClick={(event) => { event.stopPropagation(); beginSidebarAddEntry(group.id); }}><Icon name="plus" class="size-3.5" /></Button>
-        <Button data-sidebar-options-root type="button" variant="ghost" size="icon" class={`size-7 text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-sm ${sidebarOptionsFor() === group.id ? "bg-background text-foreground shadow-sm" : ""}`} aria-label={`More options for ${group.label}`} title={`More options for ${group.label}`} aria-expanded={sidebarOptionsFor() === group.id ? "true" : "false"} onClick={(event) => {
-          event.stopPropagation();
-          if (sidebarOptionsFor() === group.id) {
-            setSidebarOptionsFor(undefined);
-            return;
-          }
-          const bounds = event.currentTarget.getBoundingClientRect();
-          const width = 208;
-          setSidebarOptionsPosition({
-            top: Math.max(8, Math.min(bounds.top, window.innerHeight - 300)),
-            left: Math.max(8, Math.min(bounds.right + 8, window.innerWidth - width - 8)),
-          });
-          setSidebarOptionsFor(group.id);
-          setSidebarMoveTreeFor(undefined);
-          setSidebarAddEntryTo(undefined);
-        }}><Icon name="more" class="size-4" /></Button>
-        <Show when={sidebarOptionsFor() === group.id}>
-          <Portal>
-          <div data-sidebar-options-root class="fixed z-[110] w-52 rounded-md border border-border bg-background p-1 text-foreground shadow-md" style={{ top: `${sidebarOptionsPosition().top}px`, left: `${sidebarOptionsPosition().left}px` }} role="menu" aria-label={`${group.label} options`} onClick={(event) => event.stopPropagation()}>
-            <button class="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70 disabled:cursor-not-allowed disabled:opacity-40" type="button" role="menuitem" disabled={position <= 0} onClick={() => moveMenuEntry(group.id, -1)}><Icon name="up" class="size-4 text-muted-foreground" />Move up</button>
-            <button class="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70 disabled:cursor-not-allowed disabled:opacity-40" type="button" role="menuitem" disabled={position < 0 || position >= siblings.length - 1} onClick={() => moveMenuEntry(group.id, 1)}><Icon name="downArrow" class="size-4 text-muted-foreground" />Move down</button>
-            <button class="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70" type="button" role="menuitem" aria-expanded={sidebarMoveTreeFor() === group.id ? "true" : "false"} onClick={() => setSidebarMoveTreeFor((current) => current === group.id ? undefined : group.id)}><Icon name="right" class="size-4 text-muted-foreground" /><span class="flex-1">Move to</span><Icon name="rightChevron" class="size-4 text-muted-foreground" /></button>
-            <Show when={sidebarMoveTreeFor() === group.id}>
-              <div class="my-1 max-h-48 overflow-y-auto border-y border-border py-1" role="group" aria-label="Move group to menu">
-                <Show when={group.type === "section"}><button class="flex min-h-9 w-full items-center rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70" type="button" onClick={() => moveMenuGroupTo(group.id)}>Workspace menu</button></Show>
-                <For each={targets}>{(target) => <button class="flex min-h-9 w-full items-center gap-2 rounded-md pr-2 text-left text-sm text-foreground hover:bg-accent/70" style={{ "padding-left": `${8 + target.depth * 12}px` }} type="button" onClick={() => moveMenuGroupTo(group.id, target.id)}><Icon name="rightChevron" class="size-3.5 text-muted-foreground" />{target.label}</button>}</For>
-              </div>
-            </Show>
-            <div class="my-1 border-t border-border" />
-            <button class="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-destructive hover:bg-accent/70" type="button" role="menuitem" onClick={() => removeMenuGroup(group.id)}><Icon name="trash" class="size-4" />Delete {group.type}</button>
-          </div>
-          </Portal>
+  function renderSidebarActions(entry: NavigationEntry, indent = 0, section = false) {
+    const buttons = entry.buttons;
+    const actionCount = Number(buttons?.options !== false)
+      + Number(buttons?.edit !== false)
+      + Number(buttons?.visibility !== false)
+      + Number(buttons?.delete !== false)
+      + Number(isNavigationContainer(entry) && buttons?.add !== false);
+    const actionWidth = actionCount * 28 + Math.max(0, actionCount - 1) * 2 + 4;
+    const groupChevronWidth = entry.type === "group" && entry.chevron !== false ? 28 : 0;
+    const fixedWidth = 16 + indent + (section ? 4 : 16) + (section ? 0 : 24) + groupChevronWidth;
+    const labelWidth = entry.label.length * 7.5;
+    const canShowInline = !sidebarCollapsed() && (navigation().shell?.sidebar.width ?? 256) - fixedWidth - actionWidth >= labelWidth;
+    const showActions = !sidebarCollapsed() && (buttons?.options !== false || (canShowInline && (
+      buttons?.edit !== false || buttons?.visibility !== false || buttons?.delete !== false ||
+      (isNavigationContainer(entry) && buttons?.add !== false)
+    )));
+    const iconAction = (action: MenuItemActionKey, label: string, icon: string) =>
+      <button class="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground" type="button" title={`${label} ${entry.label}`} aria-label={`${label} ${entry.label}`} onClick={(event) => { event.stopPropagation(); runMenuAction(entry, action); }}><Icon name={icon} class="size-4" /></button>;
+    return <Show when={showActions}>
+      <div class="sidebar-entry-actions relative flex shrink-0 items-center gap-0.5 pr-1" onClick={(event) => event.stopPropagation()}>
+        <Show when={canShowInline && isNavigationContainer(entry) && buttons?.add !== false}>{iconAction("add", "Add menu item to", "plus")}</Show>
+        <Show when={canShowInline && buttons?.edit !== false}>{iconAction("edit", "Edit", "edit")}</Show>
+        <Show when={canShowInline && buttons?.visibility !== false}>{iconAction("visibility", entry.visible === false ? "Show" : "Hide", entry.visible === false ? "eye" : "eyeOff")}</Show>
+        <Show when={canShowInline && buttons?.delete !== false}>{iconAction("delete", "Delete", "trash")}</Show>
+        <Show when={buttons?.options !== false}>
+          <button ref={sidebarOptionsTrigger} class="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground" type="button" title={`More options for ${entry.label}`} aria-label={`More options for ${entry.label}`} aria-haspopup="menu" aria-controls="workspace-menu-options" aria-expanded={openSidebarOptions()?.id === entry.id ? "true" : "false"} onClick={(event) => {
+            sidebarOptionsTrigger = event.currentTarget;
+            const rect = event.currentTarget.getBoundingClientRect();
+            const sidebarRight = sidebarElement?.getBoundingClientRect().right ?? rect.right;
+            const top = Math.max(8, Math.min(rect.top, window.innerHeight - 360));
+            setOpenSidebarOptions((current) => current?.id === entry.id ? undefined : { id: entry.id, top, left: sidebarRight + 8, maxHeight: Math.max(120, window.innerHeight - top - 8) });
+          }}><Icon name="more" class="size-4" /></button>
+          <Show when={openSidebarOptions()?.id === entry.id}>
+            <Portal>
+            <div ref={sidebarOptionsPanel} id="workspace-menu-options" role="menu" aria-label={`${entry.label} options`} class="fixed z-[1000] grid w-56 gap-0.5 overflow-y-auto rounded-md border border-border bg-background p-1 shadow-lg" style={{ top: `${openSidebarOptions()?.top ?? 8}px`, left: `${openSidebarOptions()?.left ?? 280}px`, "max-height": `${openSidebarOptions()?.maxHeight ?? window.innerHeight - 16}px` }}>
+              <Show when={buttons?.edit !== false}><button role="menuitem" class="flex min-h-8 items-center gap-2 rounded px-2 text-left text-sm hover:bg-accent" type="button" onClick={() => runMenuAction(entry, "edit")}><Icon name="edit" />Edit</button></Show>
+              <Show when={buttons?.visibility !== false}><button role="menuitem" class="flex min-h-8 items-center gap-2 rounded px-2 text-left text-sm hover:bg-accent" type="button" onClick={() => runMenuAction(entry, "visibility")}><Icon name={entry.visible === false ? "eye" : "eyeOff"} />{entry.visible === false ? "Show" : "Hide"}</button></Show>
+              <Show when={buttons?.delete !== false}><button role="menuitem" class="flex min-h-8 items-center gap-2 rounded px-2 text-left text-sm text-destructive hover:bg-accent" type="button" onClick={() => runMenuAction(entry, "delete")}><Icon name="trash" />Delete</button></Show>
+              <Show when={isNavigationContainer(entry) && buttons?.add !== false}><button role="menuitem" class="flex min-h-8 items-center gap-2 rounded px-2 text-left text-sm hover:bg-accent" type="button" onClick={() => runMenuAction(entry, "add")}><Icon name="plus" />Add menu item</button></Show>
+              <Show when={buttons?.moveUp !== false}><button role="menuitem" class="flex min-h-8 items-center gap-2 rounded px-2 text-left text-sm hover:bg-accent" type="button" onClick={() => runMenuAction(entry, "moveUp")}><Icon name="up" />Move up</button></Show>
+              <Show when={buttons?.moveDown !== false}><button role="menuitem" class="flex min-h-8 items-center gap-2 rounded px-2 text-left text-sm hover:bg-accent" type="button" onClick={() => runMenuAction(entry, "moveDown")}><Icon name="downArrow" />Move down</button></Show>
+              <Show when={buttons?.moveTo !== false}><button role="menuitem" class="flex min-h-8 items-center gap-2 rounded px-2 text-left text-sm hover:bg-accent" type="button" onClick={() => runMenuAction(entry, "moveTo")}><Icon name="right" />Move to</button></Show>
+              <Show when={buttons?.edit === false && buttons?.visibility === false && buttons?.delete === false && buttons?.add === false && buttons?.moveUp === false && buttons?.moveDown === false && buttons?.moveTo === false}><span class="px-2 py-1 text-xs text-muted-foreground">No actions configured</span></Show>
+            </div>
+            </Portal>
+          </Show>
         </Show>
       </div>
     </Show>;
   }
 
   function renderSidebarLink(entry: NavigationLink, depth: number) {
-    const icon = <Icon name={entry.icon ?? (entry.type === "action" ? "settings" : "grid")} class="size-4 shrink-0" />;
+    if (entry.type === "action") return null;
     const active = () => activeMenuEntryId() === entry.id;
-    const siblings = () => findMenuSiblings(entry.id) ?? [];
-    const position = () => siblings().findIndex((sibling) => sibling.id === entry.id);
-    const targets = () => {
-      const output: { id: string; label: string; depth: number }[] = [];
-      const walk = (items: NavigationEntry[], targetDepth = 0) => items.forEach((candidate) => {
-        if (!isNavigationContainer(candidate)) return;
-        output.push({ id: candidate.id, label: candidate.label, depth: targetDepth });
-        walk(candidate.children, targetDepth + 1);
-      });
-      walk(menuEntries(navigation()));
-      return output;
-    };
-    return <div class={`group/entry flex min-w-0 items-center gap-0.5 rounded-md transition-colors ${active() ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-accent/70"}`}>
-    <a
-      class={`flex min-w-0 min-h-9 flex-1 items-center gap-2 rounded-md text-sm no-underline transition-colors ${sidebarCollapsed() ? "justify-center px-0" : "px-2"} ${active() ? "text-accent-foreground" : "text-foreground hover:bg-transparent"}`}
-      style={{ "padding-left": `${sidebarCollapsed() ? 0 : 8 + Math.max(0, depth - 1) * 16}px` }}
+    return <div class={`sidebar-entry-row group/menu-row relative flex min-w-0 items-center rounded-md transition-colors hover:bg-accent/70 ${active() ? "bg-accent" : ""}`} data-active={active() ? "true" : "false"} style={{ "padding-left": `${sidebarCollapsed() ? 0 : 8 + Math.max(0, depth - 1) * 16}px` }}><a
+      class={`flex min-w-0 min-h-9 flex-1 items-center gap-2 rounded-md text-sm no-underline transition-colors ${sidebarCollapsed() ? "justify-center px-0" : "px-2"} ${active() ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-accent/70"}`}
       title={entry.label}
       aria-label={entry.label}
       aria-current={active() ? "page" : undefined}
@@ -537,52 +345,16 @@ export default function App() {
       onClick={(event) => followMenuLink(entry, event)}
       target={entry.type === "external" ? "_blank" : undefined}
       rel={entry.type === "external" ? "noopener noreferrer" : undefined}
-    >{icon}<Show when={!sidebarCollapsed()}><span class="min-w-0 flex-1 truncate">{entry.label}</span></Show></a>
-    <Show when={!sidebarCollapsed()}>
-      <div class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/entry:opacity-100 group-focus-within/entry:opacity-100 pointer-events-none group-hover/entry:pointer-events-auto group-focus-within/entry:pointer-events-auto">
-        <Button type="button" variant="ghost" size="icon" class="size-7 text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-sm" aria-label={`Edit entry ${entry.label}`} title={`Edit ${entry.label}`} onClick={() => { setSidebarAddEntryTo(undefined); setSidebarEditItemId(entry.id); }}><Pencil class="size-3.5" /></Button>
-        <Button type="button" variant="ghost" size="icon" class="size-7 text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-sm" aria-label={`Delete entry ${entry.label}`} title={`Delete ${entry.label}`} onClick={(event) => { event.stopPropagation(); removeMenuGroup(entry.id); }}><Icon name="trash" class="size-3.5" /></Button>
-        <Button data-sidebar-options-root type="button" variant="ghost" size="icon" class={`size-7 text-muted-foreground hover:bg-background hover:text-foreground hover:shadow-sm ${sidebarOptionsFor() === entry.id ? "bg-background text-foreground shadow-sm" : ""}`} aria-label={`Settings for entry ${entry.label}`} title={`Settings for ${entry.label}`} aria-expanded={sidebarOptionsFor() === entry.id ? "true" : "false"} onClick={(event) => {
-          event.stopPropagation();
-          if (sidebarOptionsFor() === entry.id) {
-            setSidebarOptionsFor(undefined);
-            return;
-          }
-          const bounds = event.currentTarget.getBoundingClientRect();
-          const width = 208;
-          setSidebarOptionsPosition({ top: Math.max(8, Math.min(bounds.top, window.innerHeight - 300)), left: Math.max(8, Math.min(bounds.right + 8, window.innerWidth - width - 8)) });
-          setSidebarOptionsFor(entry.id);
-          setSidebarMoveTreeFor(undefined);
-          setSidebarAddEntryTo(undefined);
-        }}><Icon name="more" class="size-4" /></Button>
-        <Show when={sidebarOptionsFor() === entry.id}>
-          <Portal>
-            <div data-sidebar-options-root class="fixed z-[110] w-52 rounded-md border border-border bg-background p-1 text-foreground shadow-md" style={{ top: `${sidebarOptionsPosition().top}px`, left: `${sidebarOptionsPosition().left}px` }} role="menu" aria-label={`Settings for ${entry.label}`} onClick={(event) => event.stopPropagation()}>
-              <button class="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70 disabled:cursor-not-allowed disabled:opacity-40" type="button" role="menuitem" disabled={position() <= 0} onClick={() => moveMenuEntry(entry.id, -1)}><Icon name="up" class="size-4 text-muted-foreground" />Move up</button>
-              <button class="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70 disabled:cursor-not-allowed disabled:opacity-40" type="button" role="menuitem" disabled={position() < 0 || position() >= siblings().length - 1} onClick={() => moveMenuEntry(entry.id, 1)}><Icon name="downArrow" class="size-4 text-muted-foreground" />Move down</button>
-              <button class="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70" type="button" role="menuitem" aria-expanded={sidebarMoveTreeFor() === entry.id ? "true" : "false"} onClick={() => setSidebarMoveTreeFor((current) => current === entry.id ? undefined : entry.id)}><Icon name="right" class="size-4 text-muted-foreground" /><span class="flex-1">Move to</span><Icon name="rightChevron" class="size-4 text-muted-foreground" /></button>
-              <Show when={sidebarMoveTreeFor() === entry.id}>
-                <div class="my-1 max-h-48 overflow-y-auto border-y border-border py-1" role="group" aria-label={`Move ${entry.label} to menu`}>
-                  <For each={targets()}>{(target) => <button class="flex min-h-9 w-full items-center gap-2 rounded-md pr-2 text-left text-sm text-foreground hover:bg-accent/70" style={{ "padding-left": `${8 + target.depth * 12}px` }} type="button" onClick={() => moveMenuEntryTo(entry.id, target.id)}><Icon name="rightChevron" class="size-3.5 text-muted-foreground" />{target.label}</button>}</For>
-                </div>
-              </Show>
-              <div class="my-1 border-t border-border" />
-              <button class="flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-destructive hover:bg-accent/70" type="button" role="menuitem" onClick={() => removeMenuGroup(entry.id)}><Icon name="trash" class="size-4" />Delete entry</button>
-            </div>
-          </Portal>
-        </Show>
-      </div>
-    </Show>
-    </div>;
+    ><Icon name={entry.icon ?? "grid"} class="size-4 shrink-0" /><Show when={!sidebarCollapsed()}><span class="min-w-12 flex-1 whitespace-normal break-words" title={entry.label}>{entry.label}</span></Show></a>{renderSidebarActions(entry, 8 + Math.max(0, depth - 1) * 16)}</div>;
   }
 
   function renderSidebarEntry(entry: NavigationEntry, depth = 0) {
     if (entry.visible === false) return null;
     if (entry.type === "section") {
       return <section class="mb-4" aria-label={`${entry.label} menu`}>
-        <div class={`group/menu-item group/header relative mb-1 flex min-h-9 items-center rounded-md transition-colors hover:bg-accent/70 ${sidebarCollapsed() ? "justify-center px-0" : "px-1"}`}>
-          <Show when={!sidebarCollapsed()}><h2 class="min-w-0 flex-1 truncate px-1 py-2 text-[13px] font-medium text-muted-foreground">{entry.label}</h2></Show>
-          {renderSidebarGroupActions(entry)}
+        <div class={`sidebar-entry-row group/menu-item group/header relative mb-1 flex min-h-9 items-center rounded-md transition-colors hover:bg-accent/70 ${sidebarCollapsed() ? "justify-center px-0" : "px-1"}`} data-active="false">
+          <Show when={!sidebarCollapsed()}><h2 class="min-w-12 flex-1 whitespace-normal break-words px-1 py-2 text-[13px] font-medium text-muted-foreground" title={entry.label}>{entry.label}</h2></Show>
+          {renderSidebarActions(entry, 0, true)}
         </div>
         <ul class="m-0 list-none p-0"><For each={entry.children}>{(child) => <li>{renderSidebarEntry(child, depth + 1)}</li>}</For></ul>
       </section>;
@@ -590,16 +362,16 @@ export default function App() {
     if (entry.type !== "group") return renderSidebarLink(entry, depth);
     const expanded = () => menuGroupExpanded(entry);
     return <div class="mb-0.5">
-      <div class="group/menu-item group/menu-row flex items-center rounded-md transition-colors hover:bg-accent/70" style={{ "padding-left": `${sidebarCollapsed() ? 0 : Math.max(0, depth - 1) * 16}px` }}>
+      <div class="sidebar-entry-row group/menu-item group/menu-row flex items-center rounded-md transition-colors hover:bg-accent/70" data-active={expanded() ? "true" : "false"} style={{ "padding-left": `${sidebarCollapsed() ? 0 : Math.max(0, depth - 1) * 16}px` }}>
         <button class={`flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded-md text-left text-sm text-foreground ${sidebarCollapsed() ? "justify-center px-0" : "px-2"}`} type="button" title={entry.label} aria-label={entry.label} aria-expanded={expanded() ? "true" : "false"} onClick={() => toggleMenuGroup(entry)}>
-          <Icon name={entry.icon ?? "grid"} class="size-4 shrink-0" /><Show when={!sidebarCollapsed()}><span class="min-w-0 flex-1 truncate">{entry.label}</span></Show>
+          <Icon name={entry.icon ?? "grid"} class="size-4 shrink-0" /><Show when={!sidebarCollapsed()}><span class="min-w-12 flex-1 whitespace-normal break-words" title={entry.label}>{entry.label}</span></Show>
         </button>
-        {renderSidebarGroupActions(entry)}
         <Show when={!sidebarCollapsed() && entry.chevron !== false}>
           <button class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground" type="button" title={`${expanded() ? "Collapse" : "Expand"} ${entry.label}`} aria-label={`${expanded() ? "Collapse" : "Expand"} ${entry.label}`} aria-expanded={expanded() ? "true" : "false"} onClick={() => toggleMenuGroup(entry)}>
             <Icon name="down" class={`size-4 transition-transform ${expanded() ? "rotate-0" : "-rotate-90"}`} />
           </button>
         </Show>
+        {renderSidebarActions(entry, Math.max(0, depth - 1) * 16)}
       </div>
       <Show when={expanded()}><ul class="m-0 list-none p-0"><For each={entry.children}>{(child) => <li>{renderSidebarEntry(child, depth + 1)}</li>}</For></ul></Show>
     </div>;
@@ -608,80 +380,61 @@ export default function App() {
   function renderTopEntry(entry: NavigationEntry) {
     if (entry.visible === false) return null;
     if (isNavigationContainer(entry)) return <><span class="px-2 text-[13px] font-medium text-muted-foreground">{entry.label}</span><For each={entry.children}>{(child) => renderTopEntry(child)}</For></>;
-    if (entry.type === "action") return <a class={`flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] no-underline ${studioOpen() ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`} aria-label={entry.label} aria-current={studioOpen() ? "page" : undefined} href={menuHref(entry)} onClick={(event) => followMenuLink(entry, event)}><Icon name={entry.icon ?? "settings"} />{entry.label}</a>;
+    if (entry.type === "action") return null;
     return <a class="rounded-md px-2 py-1.5 text-[13px] text-muted-foreground no-underline hover:bg-accent hover:text-foreground" href={menuHref(entry)} onClick={(event) => followMenuLink(entry, event)} target={entry.type === "external" ? "_blank" : undefined} rel={entry.type === "external" ? "noopener noreferrer" : undefined}>{entry.label}</a>;
   }
 
-  const breadcrumbSegments = () => {
-    const route = navigation().routes.find((candidate) => candidate.id === activeRoute());
-    const segments = route?.path.split("/").filter(Boolean) ?? [];
-    return segments.slice(-1 * (navigation().shell?.breadcrumbs.maxDepth ?? 5));
-  };
-
-  function findAdminPanelEntry(entries: NavigationEntry[] = menuEntries(navigation())): Extract<NavigationEntry, { type: "action" }> | undefined {
+  function findMenuEntryPath(id: string, entries = menuEntries(navigation()), ancestors: NavigationEntry[] = []): NavigationEntry[] | undefined {
     for (const entry of entries) {
-      if (entry.type === "action" && entry.action === "admin-panel") return entry;
+      const path = [...ancestors, entry];
+      if (entry.id === id) return path;
       if (isNavigationContainer(entry)) {
-        const nested = findAdminPanelEntry(entry.children);
+        const nested = findMenuEntryPath(id, entry.children, path);
         if (nested) return nested;
       }
     }
     return undefined;
   }
 
-  function migrateAdminPanelMenuEntry(config: WorkspaceNavigation): WorkspaceNavigation {
-    const legacyEntry = findAdminPanelEntry(menuEntries(config));
-    const sidebar = config.shell?.sidebar ?? defaultNavigation.shell?.sidebar;
-    if (!sidebar) return config;
-    let removedLegacyEntry = false;
-    let migratedRootGroups = false;
-    const removeLegacyEntries = (entries: NavigationEntry[]): NavigationEntry[] => {
-      const cleaned: NavigationEntry[] = [];
-      for (const entry of entries) {
-        if (entry.type === "action" && entry.action === "admin-panel") {
-          removedLegacyEntry = true;
-          continue;
-        }
-        if (!isNavigationContainer(entry)) {
-          cleaned.push(entry);
-          continue;
-        }
-        const children = removeLegacyEntries(entry.children);
-        if (children.length === 0 && children.length !== entry.children.length) continue;
-        cleaned.push(children.length === entry.children.length ? entry : { ...entry, children });
-      }
-      return cleaned;
-    };
-    const menus = config.menus.map((menu) => ({
-      ...menu,
-      entries: removeLegacyEntries(menu.entries).map((entry) => {
-        if (entry.type !== "group") return entry;
-        migratedRootGroups = true;
-        const { chevron: _chevron, defaultExpanded: _defaultExpanded, ...section } = entry;
-        return { ...section, type: "section" as const };
-      }),
-    }));
-    const adminMenuSettingsPath = sidebar.adminMenuSettingsPath ?? legacyEntry?.path;
-    if (!removedLegacyEntry && !migratedRootGroups && adminMenuSettingsPath === sidebar.adminMenuSettingsPath) return config;
-    const shell = config.shell ?? defaultNavigation.shell;
-    if (!shell) return config;
-    return {
-      ...config,
-      menus,
-      shell: { ...shell, sidebar: { ...sidebar, ...(adminMenuSettingsPath ? { adminMenuSettingsPath } : {}) } },
-    };
-  }
+  const breadcrumbItems = () => {
+    const route = navigation().routes.find((candidate) => candidate.id === activeRoute());
+    if (route?.path === navigation().shell?.sidebar.adminMenuSettingsPath) {
+      return [{ label: "Workspace Settings", icon: "grid" } satisfies MicrofrontendBreadcrumb];
+    }
+    const installation = route && navigation().installations.find((candidate) => candidate.id === route.installationId);
+    const applicationName = installation
+      ? catalog()?.apps.find((application) => application.id === installation.appId)?.name ?? installation.appId
+      : undefined;
+    const configuredPath = activeMenuEntryId() ? findMenuEntryPath(activeMenuEntryId()!) : undefined;
+    const routeSegments = route?.path.split("/").filter(Boolean) ?? [];
+    const firstRouteSegment = routeSegments[0];
+    const routeSection = firstRouteSegment
+      ? menuEntries(navigation()).find((entry) => entry.type === "section"
+        && (entry.id.toLowerCase() === firstRouteSegment.toLowerCase()
+          || entry.label.toLowerCase().replace(/\s+/g, "-") === firstRouteSegment.toLowerCase()))
+        ?? (route?.path === navigation().shell?.sidebar.adminMenuSettingsPath
+          ? menuEntries(navigation()).find((entry) => entry.type === "section" && (entry.id === "settings" || entry.label.toLowerCase() === "settings"))
+          : undefined)
+      : undefined;
+    const routeTitle = routeSegments.at(-1)?.split(/[-_]/).map((part) => part ? part.slice(0, 1).toUpperCase() + part.slice(1) : "").join(" ");
+    const baseItems: MicrofrontendBreadcrumb[] = configuredPath
+      ? configuredPath.map((entry) => ({ label: entry.label, icon: entry.icon ?? "grid" }))
+      : routeSection && routeTitle
+        ? [{ label: routeSection.label, icon: routeSection.icon ?? "grid" }, { label: routeTitle, icon: "grid" }]
+        : applicationName
+          ? [{ label: applicationName, icon: "box" }]
+          : routeSegments.map((label) => ({ label, icon: "grid" }));
+    return [...baseItems, ...(activeRoute() ? remoteBreadcrumbs() : [])]
+      .slice(-1 * (navigation().shell?.breadcrumbs.maxDepth ?? 5));
+  };
 
   function adminMenuSettingsPath() {
-    return navigation().shell?.sidebar.adminMenuSettingsPath ?? findAdminPanelEntry()?.path;
+    return navigation().shell?.sidebar.adminMenuSettingsPath;
   }
 
   function openAdminMenuSettings() {
-    const path = adminMenuSettingsPath();
-    if (!path) return;
-    clearActiveApplication();
-    setStudioOpen(true);
-    if (window.location.pathname !== path) window.history.pushState({}, "", path);
+    const route = navigation().routes.find((candidate) => candidate.path === adminMenuSettingsPath());
+    if (route) openRoute(route.id);
   }
 
   function findRouteMenuEntryId(routeId: string, entries: NavigationEntry[] = menuEntries(navigation())): string | undefined {
@@ -701,42 +454,48 @@ export default function App() {
   });
 
   function handlePopState() {
-    const adminPath = adminMenuSettingsPath();
-    if (adminPath && window.location.pathname === adminPath) {
-      clearActiveApplication();
-      setStudioOpen(true);
-      return;
-    }
-    const match = navigation().routes.find((route) => window.location.pathname === route.path);
-    if (match) openRoute(match.id, false); else { setActiveMenuEntryId(undefined); clearActiveApplication(); }
+    void refreshWorkspace().then(() => {
+      const match = navigation().routes.find((route) => window.location.pathname === route.path);
+      if (match) openRoute(match.id, false); else { setActiveMenuEntryId(undefined); clearActiveApplication(); }
+    });
   }
 
-  async function saveConfiguration(config = navigation()) {
-    const saved = await updateWorkspaceConfig(config, revision(), accessToken() || undefined);
-    setNavigation(saved.config);
-    setRevision(saved.revision);
-    setWorkspaceStatus(`Configuration revision ${saved.revision}`);
-  }
 
   onSettled(() => {
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!openSidebarOptions()) return;
+      const target = event.target;
+      if (target instanceof Node && (sidebarOptionsPanel?.contains(target) || sidebarOptionsTrigger?.contains(target))) return;
+      const focused = document.activeElement;
+      if (focused instanceof HTMLElement && (focused === sidebarOptionsTrigger || sidebarOptionsPanel?.contains(focused))) focused.blur();
+      setOpenSidebarOptions(undefined);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !openSidebarOptions()) return;
+      event.preventDefault();
+      const trigger = sidebarOptionsTrigger;
+      setOpenSidebarOptions(undefined);
+      trigger?.focus();
+    };
+    const closeOnViewportChange = () => setOpenSidebarOptions(undefined);
+    document.addEventListener("pointerdown", closeOnOutsidePointer, true);
+    document.addEventListener("keydown", closeOnEscape);
+    document.addEventListener("scroll", closeOnViewportChange, true);
+    window.addEventListener("resize", closeOnViewportChange);
     window.addEventListener("popstate", handlePopState);
-    document.addEventListener("pointerdown", closeSidebarOptionsOnOutsideClick);
     void finishSignIn().then((signedIn) => {
       if (signedIn) setAccessToken(getAccessToken() ?? "");
     }).catch((error: unknown) => setWorkspaceStatus(error instanceof Error ? error.message : "Ferriskey sign-in failed"));
     void refreshWorkspace().then(() => {
-      const adminPath = adminMenuSettingsPath();
-      if (adminPath && window.location.pathname === adminPath) {
-        clearActiveApplication();
-        setStudioOpen(true);
-        return;
-      }
       const current = navigation().routes.find((route) => window.location.pathname === route.path);
       if (current) openRoute(current.id, false);
     });
     return () => {
       window.removeEventListener("popstate", handlePopState);
-      document.removeEventListener("pointerdown", closeSidebarOptionsOnOutsideClick);
+      document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
+      document.removeEventListener("keydown", closeOnEscape);
+      document.removeEventListener("scroll", closeOnViewportChange, true);
+      window.removeEventListener("resize", closeOnViewportChange);
       clearRemote();
     };
   });
@@ -744,14 +503,14 @@ export default function App() {
   return (
     <div class="flex h-dvh overflow-hidden bg-background font-sans text-foreground">
       <Show when={sidebarMenu()}>
-        <aside class="sticky top-0 flex h-dvh min-h-0 shrink-0 flex-col self-start border-r border-border bg-muted/30" style={{ width: `${sidebarCollapsed() ? 48 : navigation().shell?.sidebar.width ?? 256}px` }}>
+        <aside ref={sidebarElement} class="sticky top-0 flex h-dvh min-h-0 shrink-0 flex-col self-start border-r border-border bg-muted/30" style={{ width: `${sidebarCollapsed() ? 48 : navigation().shell?.sidebar.width ?? 256}px` }}>
           <div class={`flex ${sidebarCollapsed() ? "h-24 shrink-0 flex-col px-0" : "h-[52px] items-center gap-2 px-3"}`}>
             <a class={`brand flex min-w-0 items-center gap-2.5 text-foreground no-underline ${sidebarCollapsed() ? "h-12 w-full shrink-0 justify-center" : "flex-1"}`} href="/" onClick={(event) => { event.preventDefault(); clearActiveApplication(); window.history.pushState({}, "", "/"); }}>
               <span class="grid size-8 shrink-0 place-items-center rounded-lg bg-background text-primary"><Icon name="box" class="size-4" /></span>
               <Show when={!sidebarCollapsed()}><span class="min-w-0 leading-tight"><strong class="block truncate text-[13px] font-semibold">Modulaga Admin</strong><span class="block truncate text-xs text-muted-foreground">Workspace shell</span></span></Show>
             </a>
             <Show when={adminMenuSettingsPath() && !sidebarCollapsed()}>
-              <Button type="button" variant="ghost" size="icon" class={`shrink-0 ${sidebarCollapsed() ? "h-7 w-7" : ""}`} aria-label="Admin menu settings" title="Admin menu settings" aria-current={studioOpen() ? "page" : undefined} onClick={openAdminMenuSettings}><Icon name="settings" /></Button>
+              <Button type="button" variant="ghost" size="icon" class={`shrink-0 ${sidebarCollapsed() ? "h-7 w-7" : ""}`} aria-label="Workspace settings" title="Workspace settings" aria-current={window.location.pathname === adminMenuSettingsPath() ? "page" : undefined} onClick={openAdminMenuSettings}><Icon name="settings" /></Button>
             </Show>
             <Show when={navigation().shell?.sidebar.mode === "collapsible"}>
               <Button type="button" variant="ghost" size="icon" class={sidebarCollapsed() ? "h-12 w-full rounded-none" : "shrink-0"} aria-label={sidebarCollapsed() ? "Expand sidebar" : "Collapse sidebar"} onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}><Icon name={sidebarCollapsed() ? "panelOpen" : "panelClose"} /></Button>
@@ -765,14 +524,18 @@ export default function App() {
 
       <div class="flex min-h-0 min-w-0 flex-1 flex-col">
         <header class="flex h-[52px] shrink-0 items-center gap-3 border-b border-border bg-background px-4 sm:px-6">
-          <span class="truncate text-sm font-medium">{navigation().workspace.name}</span>
+          <Show when={navigation().shell?.breadcrumbs.enabled && breadcrumbItems().length > 0} fallback={<span class="truncate text-sm font-medium">{navigation().workspace.name}</span>}>
+            <nav class="flex min-w-0 items-center gap-2 overflow-x-auto whitespace-nowrap text-sm text-muted-foreground" aria-label="Breadcrumb">
+              <For each={breadcrumbItems()}>{(item, index) => <>{index() > 0 && <span aria-hidden="true">{navigation().shell?.breadcrumbs.separator ?? "/"}</span>}<Show when={item.onClick} fallback={<span class="inline-flex items-center gap-1.5"><Icon name={item.icon ?? "grid"} class="size-4 shrink-0" />{item.label}</span>}><button type="button" class="inline-flex items-center gap-1.5 rounded-sm hover:text-foreground" onClick={item.onClick}><Icon name={item.icon ?? "grid"} class="size-4 shrink-0" />{item.label}</button></Show></>}</For>
+            </nav>
+          </Show>
           <Show when={!sidebarMenu()}>
             <nav class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto" aria-label="Workspace menu">
               <For each={menuEntries(navigation())}>{(entry) => renderTopEntry(entry)}</For>
             </nav>
           </Show>
           <Show when={!sidebarMenu() && adminMenuSettingsPath()}>
-            <Button variant="ghost" size="icon" type="button" aria-label="Admin menu settings" title="Admin menu settings" aria-current={studioOpen() ? "page" : undefined} onClick={openAdminMenuSettings}><Icon name="settings" /></Button>
+            <Button variant="ghost" size="icon" type="button" aria-label="Workspace settings" title="Workspace settings" aria-current={window.location.pathname === adminMenuSettingsPath() ? "page" : undefined} onClick={openAdminMenuSettings}><Icon name="settings" /></Button>
           </Show>
           <div class="ml-auto flex items-center gap-1">
             <Button class="hidden sm:inline-flex" variant="outline" size="icon" type="button" aria-label="Search"><Icon name="search" /></Button>
@@ -784,8 +547,7 @@ export default function App() {
           </div>
         </header>
 
-        <main class={`min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 py-6 sm:px-6 lg:px-7 ${studioOpen() ? "hide-scrollbar" : ""}`}>
-          <Show when={studioOpen()} fallback={
+        <main class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 py-6 sm:px-6 lg:px-7">
             <Show when={activeRoute()} fallback={
                 <section aria-label="Configured dashboard" class="mx-auto max-w-[1600px]">
                   <div class="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
@@ -837,18 +599,11 @@ export default function App() {
                   </Show>
                 </section>
             }>
-              <Show when={navigation().shell?.breadcrumbs.enabled}><nav class="mb-5 flex items-center gap-2 text-sm text-muted-foreground" aria-label="Breadcrumb"><a class="text-muted-foreground no-underline hover:text-foreground" href="/" onClick={(event) => { event.preventDefault(); clearActiveApplication(); window.history.pushState({}, "", "/"); }}>{navigation().workspace.name}</a><For each={breadcrumbSegments()}>{(segment) => <><span aria-hidden="true">{navigation().shell?.breadcrumbs.separator ?? "/"}</span><span>{segment}</span></>}</For></nav></Show>
-              <h1 class="mb-2 text-2xl font-semibold tracking-tight">{navigation().routes.find((route) => route.id === activeRoute())?.path ?? "Application"}</h1><p class="mb-6 text-sm text-muted-foreground" role="status" aria-live="polite">{remoteStatus()}</p><div class="min-h-36" ref={remoteContainer} data-testid="declared-remote-container" />
+              <Show when={remoteStatus() !== "Choose a configured page from the workspace menu." && !remoteStatus().endsWith(" mounted")}><p class="mb-4 text-sm text-muted-foreground" role="status" aria-live="polite">{remoteStatus()}</p></Show><div class="min-h-36" ref={(element) => { remoteContainer = element; }} data-testid="declared-remote-container" />
             </Show>
-          }>
-            <NavigationStudio config={navigation} setConfig={setNavigation} saveConfig={saveConfiguration} />
-          </Show>
         </main>
         <footer class="flex h-7 items-center border-t border-border px-4 text-[10px] text-muted-foreground"><span>{workspaceStatus()}</span><span class="ml-auto hidden sm:inline">Modulaga workspace shell</span></footer>
       </div>
-      <Show when={currentSidebarDialog()} keyed>
-        {(dialog) => <AddMenuItemDialog entries={menuEntries(navigation())} parentId={dialog.kind === "create" ? dialog.parent.id : dialog.parentId} item={dialog.kind === "edit" ? dialog.item : undefined} routes={navigation().routes} onCancel={closeSidebarAddEntry} onSave={saveSidebarDialogItem} />}
-      </Show>
     </div>
   );
 }

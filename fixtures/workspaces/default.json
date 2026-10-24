@@ -20,6 +20,16 @@
         "schemaId": "orders-install-settings",
         "value": {}
       }
+    },
+    {
+      "id": "admin-panel-installation",
+      "appId": "admin-panel",
+      "releaseId": "admin-panel@static",
+      "basePath": "/settings",
+      "settings": {
+        "schemaId": "admin-panel-install-settings",
+        "value": {}
+      }
     }
   ],
   "routes": [
@@ -32,6 +42,11 @@
       "id": "orders-analytics",
       "installationId": "orders-installation",
       "path": "/orders/analytics"
+    },
+    {
+      "id": "workspace-settings",
+      "installationId": "admin-panel-installation",
+      "path": "/workspace-settings"
     }
   ],
   "menus": [
@@ -69,7 +84,6 @@
           "type": "section",
           "label": "Settings",
           "icon": "settings",
-          "icon": "settings",
           "visible": true,
           "children": [
             {
@@ -98,7 +112,7 @@
       "width": 264,
       "mode": "collapsible",
       "defaultCollapsed": false,
-      "adminMenuSettingsPath": "/settings/admin-panel"
+      "adminMenuSettingsPath": "/workspace-settings"
     },
     "breadcrumbs": {
       "enabled": true,
@@ -165,5 +179,6 @@
   "theme": {
     "id": "modulaga-default",
     "version": "1.0.0"
-  }
+  },
+  "services": []
 }

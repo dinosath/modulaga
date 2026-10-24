@@ -20,6 +20,36 @@
         "schemaId": "orders-install-settings",
         "value": {}
       }
+    },
+    {
+      "id": "content-types-installation",
+      "appId": "content-types",
+      "releaseId": "content-types@static",
+      "basePath": "/content-types",
+      "settings": {
+        "schemaId": "content-types-install-settings",
+        "value": {}
+      }
+    },
+    {
+      "id": "application-generator-installation",
+      "appId": "application-generator",
+      "releaseId": "application-generator@static",
+      "basePath": "/applications",
+      "settings": {
+        "schemaId": "application-generator-install-settings",
+        "value": {}
+      }
+    },
+    {
+      "id": "admin-panel-installation",
+      "appId": "admin-panel",
+      "releaseId": "admin-panel@static",
+      "basePath": "/settings",
+      "settings": {
+        "schemaId": "admin-panel-install-settings",
+        "value": {}
+      }
     }
   ],
   "routes": [
@@ -32,6 +62,36 @@
       "id": "orders-analytics",
       "installationId": "orders-installation",
       "path": "/orders/analytics"
+    },
+    {
+      "id": "content-types-overview",
+      "installationId": "content-types-installation",
+      "path": "/content-types"
+    },
+    {
+      "id": "application-generator-home",
+      "installationId": "application-generator-installation",
+      "path": "/applications/generator"
+    },
+    {
+      "id": "application-generator-templates",
+      "installationId": "application-generator-installation",
+      "path": "/applications/generator/templates"
+    },
+    {
+      "id": "application-generator-template-create",
+      "installationId": "application-generator-installation",
+      "path": "/applications/generator/templates/create"
+    },
+    {
+      "id": "application-generator-template-edit",
+      "installationId": "application-generator-installation",
+      "path": "/applications/generator/templates/edit"
+    },
+    {
+      "id": "workspace-settings",
+      "installationId": "admin-panel-installation",
+      "path": "/workspace-settings"
     }
   ],
   "menus": [
@@ -77,6 +137,22 @@
               "href": "https://example.com/help",
               "icon": "grid",
               "visible": true
+            },
+            {
+              "id": "content-types-link",
+              "type": "route",
+              "label": "Content types",
+              "routeId": "content-types-overview",
+              "icon": "box",
+              "visible": true
+            },
+            {
+              "id": "application-generator-link",
+              "type": "route",
+              "label": "Application generator",
+              "routeId": "application-generator-home",
+              "icon": "box",
+              "visible": true
             }
           ]
         }
@@ -96,7 +172,7 @@
       "width": 264,
       "mode": "collapsible",
       "defaultCollapsed": false,
-      "adminMenuSettingsPath": "/settings/admin-panel"
+      "adminMenuSettingsPath": "/workspace-settings"
     },
     "breadcrumbs": {
       "enabled": true,
@@ -163,5 +239,6 @@
   "theme": {
     "id": "modulaga-default",
     "version": "1.0.0"
-  }
+  },
+  "services": []
 }

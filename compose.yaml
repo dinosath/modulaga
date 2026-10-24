@@ -48,7 +48,7 @@ services:
   ferriskey-api:
     image: ${FERRISKEY_API_IMAGE:-ghcr.io/ferriskey/ferriskey-api:${FERRISKEY_TAG:-latest}}
     environment:
-      ALLOWED_ORIGINS: http://localhost:4310,http://127.0.0.1:4310,http://localhost:5556
+      ALLOWED_ORIGINS: http://localhost:4310,http://127.0.0.1:4310,http://localhost:5556,http://localhost:4176,http://127.0.0.1:4176,http://localhost:4177,http://127.0.0.1:4177
       SERVER_PUBLIC_URL: http://localhost:3333
       WEBAPP_URL: http://localhost:5556
       DATABASE_HOST: ferriskey-db
@@ -85,7 +85,7 @@ services:
       DATABASE_URL: sqlite:///app/data/workspace-config.sqlite?mode=rwc
       DEFAULT_WORKSPACE_CONFIG_PATH: /app/workspace-config/workspaces/default.json
       AUTH_MODE: disabled
-      ALLOWED_ORIGINS: http://localhost:4310,http://127.0.0.1:4310
+      ALLOWED_ORIGINS: http://localhost:4310,http://127.0.0.1:4310,http://localhost:4176,http://127.0.0.1:4176
       RUST_LOG: info
     ports:
       - "4303:4303"
@@ -105,7 +105,7 @@ services:
       OIDC_JWKS_URI: http://ferriskey-api:3333/realms/modulaga/protocol/openid-connect/certs
       OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
       OIDC_ADMIN_ROLE: ${OIDC_ADMIN_ROLE:-modulaga-admin}
-      ALLOWED_ORIGINS: http://localhost:4310,http://127.0.0.1:4310
+      ALLOWED_ORIGINS: http://localhost:4310,http://127.0.0.1:4310,http://localhost:4176,http://127.0.0.1:4176
       RUST_LOG: info
     ports:
       - "4303:4303"
@@ -139,13 +139,182 @@ services:
   app-catalog:
     image: ${MODULAGA_CATALOG_IMAGE:-ghcr.io/modulaga/app-catalog:${MODULAGA_TAG:-latest}}
     environment:
-      CATALOG_PATH: /app/workspace-config/catalog.json
+      CATALOG_PATH: /app/fixtures/catalog.compose.json
       CATALOG_BIND_ADDRESS: 0.0.0.0:4304
       ALLOWED_ORIGINS: http://localhost:4310,http://127.0.0.1:4310
     volumes:
-      - ./workspace-config:/app/workspace-config:ro
+      - ./fixtures:/app/fixtures:ro
     ports:
       - "4304:4304"
+    profiles: [registry]
+
+  content-types-local:
+    image: modulaga/content-types:local
+    build:
+      context: .
+      dockerfile: services/content-types/Dockerfile
+    environment:
+      CONTENT_TYPES_DATABASE_URL: sqlite:///app/data/content-types.sqlite?mode=rwc
+      AUTH_MODE: disabled
+      ALLOWED_ORIGINS: http://localhost:4310,http://127.0.0.1:4310
+      RUST_LOG: info
+    ports:
+      - "4305:4305"
+    volumes:
+      - modulaga_content_types_data:/app/data
+    profiles: [local]
+
+  content-types:
+    image: ${MODULAGA_CONTENT_TYPES_IMAGE:-ghcr.io/modulaga/content-types:${MODULAGA_TAG:-latest}}
+    environment:
+      CONTENT_TYPES_DATABASE_URL: sqlite:///app/data/content-types.sqlite?mode=rwc
+      AUTH_MODE: oidc
+      OIDC_ISSUER: ${OIDC_ISSUER:-http://localhost:3333/realms/modulaga}
+      OIDC_DISCOVERY_URL: http://ferriskey-api:3333/realms/modulaga/.well-known/openid-configuration
+      OIDC_JWKS_URI: http://ferriskey-api:3333/realms/modulaga/protocol/openid-connect/certs
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+      OIDC_ADMIN_ROLE: ${OIDC_ADMIN_ROLE:-modulaga-admin}
+      ALLOWED_ORIGINS: http://localhost:4310,http://127.0.0.1:4310
+      RUST_LOG: info
+    ports:
+      - "4305:4305"
+    volumes:
+      - modulaga_content_types_data:/app/data
+    depends_on:
+      ferriskey-api:
+        condition: service_started
+    profiles: [registry]
+
+  application-generator-local:
+    image: modulaga/application-generator:local
+    build:
+      context: .
+      dockerfile: services/application-generator/Dockerfile
+    environment:
+      APPLICATION_GENERATOR_DATABASE_URL: sqlite:///app/data/application-generator.sqlite?mode=rwc
+      CONTENT_TYPES_API_URL: http://content-types-local:4305
+      GENERATED_APPS_DIR: /app/generated
+      APPLICATION_GENERATOR_BIND_ADDRESS: 0.0.0.0:4306
+      AUTH_MODE: disabled
+      ALLOWED_ORIGINS: http://localhost:4310,http://127.0.0.1:4310,http://localhost:4300,http://127.0.0.1:4300,http://localhost:4177,http://127.0.0.1:4177
+      RUST_LOG: info
+    ports:
+      - "4306:4306"
+    volumes:
+      - modulaga_application_generator_data:/app/data
+      - ./.data/generated-apps:/app/generated
+    depends_on:
+      - content-types-local
+    profiles: [local]
+
+  application-generator:
+    image: ${MODULAGA_APPLICATION_GENERATOR_IMAGE:-ghcr.io/modulaga/application-generator:${MODULAGA_TAG:-latest}}
+    build:
+      context: .
+      dockerfile: services/application-generator/Dockerfile
+    environment:
+      APPLICATION_GENERATOR_DATABASE_URL: sqlite:///app/data/application-generator.sqlite?mode=rwc
+      CONTENT_TYPES_API_URL: http://content-types:4305
+      GENERATED_APPS_DIR: /app/generated
+      APPLICATION_GENERATOR_BIND_ADDRESS: 0.0.0.0:4306
+      AUTH_MODE: oidc
+      OIDC_ISSUER: ${OIDC_ISSUER:-http://localhost:3333/realms/modulaga}
+      OIDC_DISCOVERY_URL: http://ferriskey-api:3333/realms/modulaga/.well-known/openid-configuration
+      OIDC_JWKS_URI: http://ferriskey-api:3333/realms/modulaga/protocol/openid-connect/certs
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+      OIDC_ADMIN_ROLE: ${OIDC_ADMIN_ROLE:-modulaga-admin}
+      ALLOWED_ORIGINS: http://localhost:4310,http://127.0.0.1:4310,http://localhost:4177,http://127.0.0.1:4177
+      RUST_LOG: info
+    ports:
+      - "4306:4306"
+    volumes:
+      - modulaga_application_generator_data:/app/data
+      - modulaga_generated_apps:/app/generated
+    depends_on:
+      - content-types
+      - ferriskey-api
+    profiles: [registry]
+
+  application-generator-app-local:
+    image: modulaga/application-generator-app:local
+    build:
+      context: .
+      dockerfile: apps/application-generator/Dockerfile
+      args:
+        APPLICATION_GENERATOR_PUBLIC_URL: http://localhost:4177/
+    environment:
+      MODULAGA_APPLICATION_GENERATOR_API_URL: http://localhost:4306
+      MODULAGA_FERRISKEY_ISSUER: ""
+      MODULAGA_FERRISKEY_CLIENT_ID: ""
+    ports:
+      - "4177:80"
+    depends_on:
+      - application-generator-local
+    profiles: [local]
+
+  application-generator-app:
+    image: ${MODULAGA_APPLICATION_GENERATOR_APP_IMAGE:-ghcr.io/modulaga/application-generator-app:${MODULAGA_TAG:-latest}}
+    environment:
+      MODULAGA_APPLICATION_GENERATOR_API_URL: ${MODULAGA_APPLICATION_GENERATOR_API_URL:-http://localhost:4306}
+      MODULAGA_FERRISKEY_ISSUER: ${OIDC_ISSUER:-http://localhost:3333/realms/modulaga}
+      MODULAGA_FERRISKEY_CLIENT_ID: ${FERRISKEY_CLIENT_ID:-modulaga-shell}
+    ports:
+      - "4177:80"
+    depends_on:
+      - application-generator
+    profiles: [registry]
+
+  content-types-app-local:
+    image: modulaga/content-types-app:local
+    build:
+      context: .
+      dockerfile: apps/content-types/Dockerfile
+      args:
+        CONTENT_TYPES_PUBLIC_URL: http://localhost:4175/
+    ports:
+      - "4175:80"
+    profiles: [local]
+
+  content-types-app:
+    image: ${MODULAGA_CONTENT_TYPES_APP_IMAGE:-ghcr.io/modulaga/content-types-app:${MODULAGA_TAG:-latest}}
+    build:
+      context: .
+      dockerfile: apps/content-types/Dockerfile
+      args:
+        CONTENT_TYPES_PUBLIC_URL: http://localhost:4175/
+    ports:
+      - "4175:80"
+    profiles: [registry]
+
+  admin-panel-app-local:
+    image: modulaga/admin-panel-app:local
+    build:
+      context: .
+      dockerfile: apps/admin-panel/Dockerfile
+      args:
+        ADMIN_PANEL_PUBLIC_URL: http://localhost:4176/
+    environment:
+      MODULAGA_CONFIG_API_URL: http://localhost:4303
+      MODULAGA_WORKSPACE_ID: default
+      MODULAGA_FERRISKEY_ISSUER: ""
+      MODULAGA_FERRISKEY_CLIENT_ID: ""
+    ports:
+      - "4176:80"
+    depends_on:
+      - workspace-config-local
+    profiles: [local]
+
+  admin-panel-app:
+    image: ${MODULAGA_ADMIN_PANEL_APP_IMAGE:-ghcr.io/modulaga/admin-panel-app:${MODULAGA_TAG:-latest}}
+    environment:
+      MODULAGA_CONFIG_API_URL: ${MODULAGA_CONFIG_API_URL:-http://localhost:4303}
+      MODULAGA_WORKSPACE_ID: ${MODULAGA_WORKSPACE_ID:-default}
+      MODULAGA_FERRISKEY_ISSUER: ${OIDC_ISSUER:-http://localhost:3333/realms/modulaga}
+      MODULAGA_FERRISKEY_CLIENT_ID: ${FERRISKEY_CLIENT_ID:-modulaga-shell}
+    ports:
+      - "4176:80"
+    depends_on:
+      - workspace-config
     profiles: [registry]
 
   shell-local:
@@ -156,6 +325,8 @@ services:
     environment:
       MODULAGA_CONFIG_API_URL: http://localhost:4303
       MODULAGA_CATALOG_API_URL: http://localhost:4304
+      MODULAGA_CONTENT_TYPES_API_URL: http://localhost:4305
+      MODULAGA_APPLICATION_GENERATOR_API_URL: http://localhost:4306
       MODULAGA_WORKSPACE_ID: default
       MODULAGA_FERRISKEY_ISSUER: ""
       MODULAGA_FERRISKEY_CLIENT_ID: ""
@@ -164,12 +335,20 @@ services:
     depends_on:
       - workspace-config-local
       - app-catalog-local
+      - content-types-local
+      - content-types-app-local
+      - admin-panel-app-local
+      - application-generator-local
+      - application-generator-app-local
     profiles: [local]
 
   shell:
     image: ${MODULAGA_SHELL_IMAGE:-ghcr.io/modulaga/shell:${MODULAGA_TAG:-latest}}
     environment:
       MODULAGA_CONFIG_API_URL: ${MODULAGA_CONFIG_API_URL:-http://localhost:4303}
+      MODULAGA_CATALOG_API_URL: ${MODULAGA_CATALOG_API_URL:-http://localhost:4304}
+      MODULAGA_CONTENT_TYPES_API_URL: ${MODULAGA_CONTENT_TYPES_API_URL:-http://localhost:4305}
+      MODULAGA_APPLICATION_GENERATOR_API_URL: ${MODULAGA_APPLICATION_GENERATOR_API_URL:-http://localhost:4306}
       MODULAGA_WORKSPACE_ID: ${MODULAGA_WORKSPACE_ID:-default}
       MODULAGA_FERRISKEY_ISSUER: ${OIDC_ISSUER:-http://localhost:3333/realms/modulaga}
       MODULAGA_FERRISKEY_CLIENT_ID: ${FERRISKEY_CLIENT_ID:-modulaga-shell}
@@ -178,6 +357,11 @@ services:
     depends_on:
       - workspace-config
       - app-catalog
+      - content-types
+      - content-types-app
+      - admin-panel-app
+      - application-generator
+      - application-generator-app
     profiles: [registry]
 
   demo-react-local:
@@ -198,4 +382,7 @@ services:
 volumes:
   modulaga_data:
   modulaga_config_data:
+  modulaga_content_types_data:
+  modulaga_application_generator_data:
+  modulaga_generated_apps:
   ferriskey_data:

@@ -15,7 +15,7 @@ export type ApplicationRelease = {
   remoteName: string;
   exposedModule: string;
 };
-export type CatalogApplication = { id: string; name: string; releases: ApplicationRelease[] };
+export type CatalogApplication = { id: string; name: string; description?: string; releases: ApplicationRelease[] };
 export type ApplicationCatalog = { schemaVersion: 1; apps: CatalogApplication[] };
 export type ApplicationCatalogSnapshot = { catalog: ApplicationCatalog; revision: number };
 

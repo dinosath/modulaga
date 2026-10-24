@@ -1,10 +1,12 @@
-# Modulaga Admin Panel
+# Workspace Settings
 
-The admin panel is a static workspace app under `apps/admin-panel`. The shell
-bundles it directly, so the menu editor does not need a separately deployed
-remote. It reads and edits the workspace document served by the ConnectRPC
-configuration service.
+Workspace Settings is a microfrontend mounted at the unique
+`/workspace-settings` route. It provides the workspace menu editor, shell
+settings, styles, and dynamic views of installed applications and connected
+services. The shell only resolves this route from workspace configuration and
+mounts the declared remote.
 
-Menu entries and their order, labels, icons, visibility, and group behavior are
-defined by the workspace configuration; this app contains the editor UI, not a
-second menu definition.
+Workspace installations and services are read from the workspace configuration;
+application display names are resolved from the application catalog. Run it with
+`pnpm --filter @modulaga/admin-panel dev` or start it as part of the `local` or
+`registry` Docker Compose profile.

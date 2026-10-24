@@ -1,15 +1,17 @@
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createEffect, createSignal, untrack } from "solid-js";
 import { ArrowDown, ArrowRight, ArrowUp, ChevronRight, Ellipsis, Eye, EyeOff, GripVertical, Pencil, Plus, Trash2 } from "@lucide/solid";
 import type { JSX } from "@solidjs/web";
-import type { NavigationEntry, NavigationGroup, NavigationContainer, NavigationSection, NavigationLink, WorkspaceNavigation } from "../../shell/src/config/navigation";
-import { defaultNavigation, isNavigationContainer, menuEntries, routePath, saveNavigation } from "../../shell/src/config/navigation";
+import type { MenuButtonBinding, MenuItemActionKey, NavigationEntry, NavigationGroup, NavigationContainer, NavigationSection, NavigationLink, WorkspaceNavigation } from "../../shell/src/config/navigation";
+import type { CatalogApplication } from "../../shell/src/workspace/api";
+import { defaultMenuItemButtonActions, defaultNavigation, isNavigationContainer, menuEntries, routePath, saveNavigation } from "../../shell/src/config/navigation";
 import { AddMenuItemDialog } from "../../shell/src/components/AddMenuItemDialog";
 import { Badge } from "../../shell/src/components/ui/badge";
 import { Button } from "../../shell/src/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../shell/src/components/ui/card";
 import { Input } from "../../shell/src/components/ui/input";
 
-type Props = { config: () => WorkspaceNavigation; setConfig: (config: WorkspaceNavigation) => void; saveConfig: (config?: WorkspaceNavigation) => Promise<void> };
+type SidebarCommand = { action: "add" | "moveUp" | "moveDown" | "moveTo"; itemId: string };
+type Props = { config: () => WorkspaceNavigation; setConfig: (config: WorkspaceNavigation) => void; saveConfig: (config?: WorkspaceNavigation) => Promise<void>; applications?: () => CatalogApplication[]; openEditItemId?: () => string | undefined; sidebarCommand?: () => SidebarCommand | undefined };
 
 function slug(value: string) {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "new-item";
@@ -20,7 +22,7 @@ function safeExternalHref(href: string) {
 }
 
 export default function NavigationStudio(props: Props) {
-  const [activeTab, setActiveTab] = createSignal<"menu" | "settings" | "styles">("menu");
+  const [activeTab, setActiveTab] = createSignal<"menu" | "actions" | "settings" | "styles" | "applications" | "services">("menu");
   const [draggedEntryId, setDraggedEntryId] = createSignal<string>();
   const [dropTarget, setDropTarget] = createSignal<{ id: string; position: "before" | "after" }>();
   const [openGroupOptions, setOpenGroupOptions] = createSignal<string>();
@@ -29,6 +31,28 @@ export default function NavigationStudio(props: Props) {
   const [notice, setNotice] = createSignal("Changes update the workspace menu as you edit.");
 
   const entries = () => menuEntries(props.config());
+  createEffect(() => props.openEditItemId?.(), (itemId) => {
+    if (itemId && untrack(() => findEntry(itemId))) setMenuDialog({ kind: "edit", itemId });
+  });
+  createEffect(() => props.sidebarCommand?.(), (command) => {
+    if (!command) return;
+    const entry = untrack(() => findEntry(command.itemId));
+    if (!entry) return;
+    setActiveTab("menu");
+    if (command.action === "add" && isNavigationContainer(entry)) {
+      beginAddItem(entry);
+      return;
+    }
+    if (command.action === "moveUp" || command.action === "moveDown") {
+      moveEntryInTree(entry.id, command.action === "moveUp" ? -1 : 1);
+      setNotice(`${entry.label} moved ${command.action === "moveUp" ? "up" : "down"}. Save changes to apply it to the workspace.`);
+      return;
+    }
+    if (command.action === "moveTo") {
+      setOpenGroupOptions(entry.id);
+      setMoveTreeFor(entry.id);
+    }
+  });
   function setEntries(next: NavigationEntry[]) {
     const config = props.config();
     props.setConfig({ ...config, menus: config.menus.map((menu, index) => index === 0 ? { ...menu, entries: next } : menu) });
@@ -45,9 +69,45 @@ export default function NavigationStudio(props: Props) {
     setEntries(mapTree(entries(), id, update));
   }
 
+  const actionRows: { key: MenuItemActionKey; label: string }[] = [
+    { key: "edit", label: "Edit" },
+    { key: "visibility", label: "Visibility" },
+    { key: "delete", label: "Delete" },
+    { key: "add", label: "Add menu item" },
+    { key: "moveUp", label: "Move up" },
+    { key: "moveDown", label: "Move down" },
+    { key: "moveTo", label: "Move to" },
+  ];
+  const clientActions = [
+    { clientId: "workspace-menu", actionId: "edit", label: "Open item editor" },
+    { clientId: "workspace-menu", actionId: "visibility", label: "Toggle visibility" },
+    { clientId: "workspace-menu", actionId: "delete", label: "Delete item" },
+    { clientId: "workspace-menu", actionId: "add", label: "Add menu item" },
+    { clientId: "workspace-menu", actionId: "moveUp", label: "Move up" },
+    { clientId: "workspace-menu", actionId: "moveDown", label: "Move down" },
+    { clientId: "workspace-menu", actionId: "moveTo", label: "Move to" },
+  ];
+  function flattenEntries(items = entries(), depth = 0): { entry: NavigationEntry; depth: number }[] {
+    return items.flatMap((entry) => [
+      { entry, depth },
+      ...(isNavigationContainer(entry) ? flattenEntries(entry.children, depth + 1) : []),
+    ]);
+  }
+  function bindingValue(entry: NavigationEntry, key: MenuItemActionKey) {
+    const binding = entry.buttonActions?.[key] ?? defaultMenuItemButtonActions[key];
+    return binding.type === "component" ? `component:${binding.componentId}` : `client:${binding.clientId}:${binding.actionId}`;
+  }
+  function updateBinding(entryId: string, key: MenuItemActionKey, value: string) {
+    const [type, target, action] = value.split(":");
+    const binding: MenuButtonBinding = type === "component"
+      ? { type: "component", componentId: target ?? "menu-item-editor" }
+      : { type: "client", clientId: target ?? "workspace-menu", actionId: action ?? key };
+    updateEntry(entryId, (entry) => ({ ...entry, buttonActions: { ...entry.buttonActions, [key]: binding } }));
+  }
+
   function addSection() {
     const name = `Section ${entries().filter((entry) => entry.type === "section").length + 1}`;
-    const section: NavigationSection = { id: `${slug(name)}-${Date.now()}`, type: "section", label: name, visible: true, children: [] };
+    const section: NavigationSection = { id: `${slug(name)}-${Date.now()}`, type: "section", label: name, visible: true, buttons: { edit: true, visibility: true, delete: true, options: true }, children: [] };
     setEntries([...entries(), section]);
   }
 
@@ -295,11 +355,13 @@ export default function NavigationStudio(props: Props) {
     }
   }
 
-  const destination = (entry: NavigationLink) => entry.type === "route" ? routePath(props.config(), entry.routeId) : entry.type === "external" ? entry.href : "Admin Panel action";
+  const destination = (entry: NavigationLink) => entry.type === "route" ? routePath(props.config(), entry.routeId) : entry.type === "external" ? entry.href : "Workspace settings action";
 
   const selectClass = "h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
   const fieldClass = "grid gap-2 text-sm font-medium text-foreground";
   const iconButtonClass = "inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40";
+  const tabPanelId = () => `admin-${activeTab()}-panel`;
+  const tabLabelId = () => `admin-${activeTab()}-tab`;
   function renderMoveTargetTree(items: NavigationEntry[], source: NavigationEntry, depth = 0): JSX.Element {
     const groups = items.filter(isNavigationContainer);
     return <ul class={depth === 0 ? "grid gap-1" : "ml-3 grid gap-1 border-l border-border pl-2"}>
@@ -317,20 +379,20 @@ export default function NavigationStudio(props: Props) {
   function renderEntryActions(entry: NavigationEntry, index: number, siblings: NavigationEntry[]): JSX.Element {
     const kind = entry.type === "section" ? "section" : entry.type === "group" ? "group" : "entry";
     return <div class="relative">
-      <button class={iconButtonClass} type="button" aria-label={`More options for ${entry.label}`} aria-expanded={openGroupOptions() === entry.id ? "true" : "false"} title="More options" onClick={() => { setOpenGroupOptions((current) => current === entry.id ? undefined : entry.id); setMoveTreeFor(undefined); }}><Ellipsis class="size-4" /></button>
+      <Show when={entry.buttons?.options !== false}><button class={iconButtonClass} type="button" aria-label={`More options for ${entry.label}`} aria-expanded={openGroupOptions() === entry.id ? "true" : "false"} title="More options" onClick={() => { setOpenGroupOptions((current) => current === entry.id ? undefined : entry.id); setMoveTreeFor(undefined); }}><Ellipsis class="size-4" /></button></Show>
       <Show when={openGroupOptions() === entry.id}>
         <div class="absolute right-0 top-full z-20 mt-1 grid w-52 gap-0.5 rounded-md border border-border bg-background p-1 text-foreground shadow-md" aria-label={`${entry.label} options`}>
-          <button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70 disabled:opacity-40" type="button" aria-label={`Move ${entry.label} up`} disabled={index === 0} onClick={() => { moveEntryInTree(entry.id, -1); setOpenGroupOptions(undefined); }}><ArrowUp class="size-4 text-muted-foreground" />Move up</button>
-          <button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70 disabled:opacity-40" type="button" aria-label={`Move ${entry.label} down`} disabled={index === siblings.length - 1} onClick={() => { moveEntryInTree(entry.id, 1); setOpenGroupOptions(undefined); }}><ArrowDown class="size-4 text-muted-foreground" />Move down</button>
-          <button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70" type="button" aria-expanded={moveTreeFor() === entry.id ? "true" : "false"} onClick={() => setMoveTreeFor((current) => current === entry.id ? undefined : entry.id)}><ArrowRight class="size-4 text-muted-foreground" /><span class="flex-1">Move to</span><ChevronRight class="size-4 text-muted-foreground" /></button>
+          <Show when={entry.buttons?.edit === false}><button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70" type="button" onClick={() => { setMenuDialog({ kind: "edit", itemId: entry.id }); setOpenGroupOptions(undefined); }}>Edit {kind}</button></Show>
+          <Show when={entry.buttons?.moveUp !== false}><button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70 disabled:opacity-40" type="button" aria-label={`Move ${entry.label} up`} disabled={index === 0} onClick={() => { moveEntryInTree(entry.id, -1); setOpenGroupOptions(undefined); }}><ArrowUp class="size-4 text-muted-foreground" />Move up</button></Show>
+          <Show when={entry.buttons?.moveDown !== false}><button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70 disabled:opacity-40" type="button" aria-label={`Move ${entry.label} down`} disabled={index === siblings.length - 1} onClick={() => { moveEntryInTree(entry.id, 1); setOpenGroupOptions(undefined); }}><ArrowDown class="size-4 text-muted-foreground" />Move down</button></Show>
+          <Show when={entry.buttons?.moveTo !== false}><button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70" type="button" aria-expanded={moveTreeFor() === entry.id ? "true" : "false"} onClick={() => setMoveTreeFor((current) => current === entry.id ? undefined : entry.id)}><ArrowRight class="size-4 text-muted-foreground" /><span class="flex-1">Move to</span><ChevronRight class="size-4 text-muted-foreground" /></button></Show>
           <Show when={moveTreeFor() === entry.id}>
             <div class="my-1 grid max-h-48 gap-0.5 overflow-y-auto border-y border-border py-1" aria-label={`Move ${entry.label} to menu`}>
-              <Show when={entry.type === "section"}><button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70" type="button" onClick={() => moveEntryTo(entry.id)}>Workspace menu</button></Show>
+          <Show when={entry.type === "section"}><button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-foreground hover:bg-accent/70" type="button" onClick={() => moveEntryTo(entry.id)}>Workspace menu</button></Show>
               {renderMoveTargetTree(entries(), entry)}
             </div>
           </Show>
-          <div class="my-1 border-t border-border" />
-          <button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-destructive hover:bg-accent/70" type="button" onClick={() => { removeEntry(entry.id); setOpenGroupOptions(undefined); }}><Trash2 class="size-4" />Delete {kind}</button>
+          <Show when={entry.buttons?.delete !== false}><div class="my-1 border-t border-border" /><button class="flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-destructive hover:bg-accent/70" type="button" onClick={() => { removeEntry(entry.id); setOpenGroupOptions(undefined); }}><Trash2 class="size-4" />Delete {kind}</button></Show>
         </div>
       </Show>
     </div>;
@@ -345,13 +407,13 @@ export default function NavigationStudio(props: Props) {
         <span class="min-w-32 flex-1 truncate px-2 text-sm font-medium" title={entry.label}>{entry.label}</span>
         <span class="hidden w-24 truncate text-xs text-muted-foreground sm:block">{entry.icon ?? "grid"}</span>
         <span class="hidden max-w-44 truncate text-xs text-muted-foreground md:block">{container ? `${entry.children.length} items` : destination(entry)}</span>
-        <button class={iconButtonClass} type="button" aria-label={`Edit ${kind.toLowerCase()} ${entry.label}`} title={`Edit ${entry.label}`} onClick={() => setMenuDialog({ kind: "edit", itemId: entry.id })}><Pencil class="size-4" /></button>
-        <button class={iconButtonClass} aria-label="Toggle visibility" aria-pressed={entry.visible !== false ? "true" : "false"} onClick={() => updateEntry(entry.id, (current) => ({ ...current, visible: current.visible === false }))}>{entry.visible === false ? <EyeOff class="size-4" /> : <Eye class="size-4" />}</button>
+        <Show when={entry.buttons?.edit !== false}><button class={iconButtonClass} type="button" aria-label={`Edit ${kind.toLowerCase()} ${entry.label}`} title={`Edit ${entry.label}`} onClick={() => setMenuDialog({ kind: "edit", itemId: entry.id })}><Pencil class="size-4" /></button></Show>
+        <Show when={entry.buttons?.visibility !== false}><button class={iconButtonClass} aria-label="Toggle visibility" aria-pressed={entry.visible !== false ? "true" : "false"} onClick={() => updateEntry(entry.id, (current) => ({ ...current, visible: current.visible === false }))}>{entry.visible === false ? <EyeOff class="size-4" /> : <Eye class="size-4" />}</button></Show>
         <Show when={entry.type === "group"}><label class="flex items-center gap-1 text-xs text-muted-foreground"><input aria-label={`${entry.label} show chevron`} type="checkbox" checked={(entry as NavigationGroup).chevron !== false} onChange={(event) => { const checked = event.currentTarget.checked; updateEntry(entry.id, (current) => current.type === "group" ? { ...current, chevron: checked } : current); }} />Chevron</label><label class="flex items-center gap-1 text-xs text-muted-foreground"><input aria-label={`${entry.label} expanded by default`} type="checkbox" checked={(entry as NavigationGroup).defaultExpanded !== false} onChange={(event) => { const checked = event.currentTarget.checked; updateEntry(entry.id, (current) => current.type === "group" ? { ...current, defaultExpanded: checked } : current); }} />Expanded</label></Show>
         <Show when={container}>
-          <Button variant="outline" size="icon" type="button" aria-label={`Add to ${entry.label}`} title={`Add to ${entry.label}`} onClick={() => beginAddItem(entry as NavigationContainer)}><Plus class="size-4" /></Button>
+          <Show when={entry.buttons?.add !== false}><Button variant="outline" size="icon" type="button" aria-label={`Add to ${entry.label}`} title={`Add to ${entry.label}`} onClick={() => beginAddItem(entry as NavigationContainer)}><Plus class="size-4" /></Button></Show>
         </Show>
-        <Show when={!container}><button class={`${iconButtonClass} text-destructive hover:text-destructive`} type="button" aria-label={`Delete entry ${entry.label}`} title="Delete entry" onClick={() => removeEntry(entry.id)}><Trash2 class="size-4" /></button></Show>
+        <Show when={!container && entry.buttons?.delete !== false}><button class={`${iconButtonClass} text-destructive hover:text-destructive`} type="button" aria-label={`Delete entry ${entry.label}`} title="Delete entry" onClick={() => removeEntry(entry.id)}><Trash2 class="size-4" /></button></Show>
         {renderEntryActions(entry, index, siblings)}
       </div>
       <Show when={container}>
@@ -365,26 +427,15 @@ export default function NavigationStudio(props: Props) {
 
   return (
     <div class="min-h-full space-y-6 text-foreground">
-      <header class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div class="space-y-2">
-          <p class="text-sm text-muted-foreground">Workspace / Administration</p>
-          <h1 class="text-3xl font-semibold tracking-tight">Admin Menu Settings</h1>
-          <p class="max-w-2xl text-sm text-muted-foreground">Configure the menu for {props.config().workspace.name}.</p>
-        </div>
-        <div class="flex gap-2"><Button variant="ghost" type="button" onClick={reset}>Reset</Button><Button type="button" onClick={save}>Save changes</Button></div>
-      </header>
-
-      <div class="flex gap-1 border-b border-border" role="tablist" aria-label="Admin menu settings">
-        <button class={`border-b-2 px-4 py-3 text-sm font-medium ${activeTab() === "menu" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`} id="admin-menu-tab" role="tab" aria-selected={activeTab() === "menu" ? "true" : "false"} aria-controls="admin-menu-panel" onClick={() => { setActiveTab("menu"); }}>Menu Editor</button>
-        <button class={`border-b-2 px-4 py-3 text-sm font-medium ${activeTab() === "settings" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`} id="admin-settings-tab" role="tab" aria-selected={activeTab() === "settings" ? "true" : "false"} aria-controls="admin-settings-panel" onClick={() => { setActiveTab("settings"); }}>Settings</button>
-        <button class={`border-b-2 px-4 py-3 text-sm font-medium ${activeTab() === "styles" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`} id="admin-styles-tab" role="tab" aria-selected={activeTab() === "styles" ? "true" : "false"} aria-controls="admin-styles-panel" onClick={() => { setActiveTab("styles"); }}>Styles</button>
+      <div class="flex flex-wrap gap-1 border-b border-border" role="tablist" aria-label="Workspace administration">
+        <For each={[["menu", "Menu Editor"], ["actions", "Actions"], ["settings", "Settings"], ["styles", "Styles"], ["applications", "Applications"], ["services", "Services"]] as const}>{([tab, label]) => <button class={`border-b-2 px-4 py-3 text-sm font-medium ${activeTab() === tab ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`} id={`admin-${tab}-tab`} role="tab" aria-selected={activeTab() === tab ? "true" : "false"} aria-controls={`admin-${tab}-panel`} onClick={() => setActiveTab(tab)}>{label}</button>}</For>
       </div>
 
       <div class="grid items-start gap-5">
-        <Card aria-label="Navigation configuration">
-          <div id={activeTab() === "menu" ? "admin-menu-panel" : activeTab() === "settings" ? "admin-settings-panel" : "admin-styles-panel"} role="tabpanel" aria-labelledby={activeTab() === "menu" ? "admin-menu-tab" : activeTab() === "settings" ? "admin-settings-tab" : "admin-styles-tab"}>
+        <Card aria-label="Workspace administration">
+          <div id={tabPanelId()} role="tabpanel" aria-labelledby={tabLabelId()}>
           <CardHeader class="flex-row items-start justify-between gap-4">
-            <div class="space-y-1"><CardTitle>{activeTab() === "menu" ? "Menu structure" : activeTab() === "settings" ? "Workspace settings" : "Menu styles"}</CardTitle><CardDescription>{activeTab() === "menu" ? "Drag items to reorder application pages and menu links." : activeTab() === "settings" ? "Configure the shell layout and welcome page." : "Choose the visual theme used by the workspace shell."}</CardDescription></div>
+            <div class="space-y-1"><CardTitle>{activeTab() === "menu" ? "Menu structure" : activeTab() === "actions" ? "Menu actions" : activeTab() === "settings" ? "Workspace settings" : activeTab() === "styles" ? "Menu styles" : activeTab() === "applications" ? "Connected applications" : "Connected services"}</CardTitle><CardDescription>{activeTab() === "menu" ? "Drag items to reorder application pages and menu links." : activeTab() === "actions" ? "Choose which client action or UI component each menu button uses." : activeTab() === "settings" ? "Configure the shell layout and welcome page." : activeTab() === "styles" ? "Choose the visual theme used by the workspace shell." : activeTab() === "applications" ? "Applications currently installed in this workspace." : "Services connected through this workspace configuration."}</CardDescription></div>
             <Show when={activeTab() === "menu"}><Button variant="outline" size="sm" type="button" onClick={addSection}><Plus class="mr-1 size-4" />Add section</Button></Show>
           </CardHeader>
           <CardContent class="space-y-6">
@@ -399,6 +450,29 @@ export default function NavigationStudio(props: Props) {
               <Show when={entries().length === 0}><p class="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">No menu sections yet. Add a section to get started.</p></Show>
             </div>
 
+            </Show>
+
+            <Show when={activeTab() === "actions"}>
+              <section class="space-y-3" aria-label="Menu button action bindings">
+                <p class="text-sm text-muted-foreground">Bindings are saved with menu items in workspace configuration. Button visibility is managed in each item’s editor.</p>
+                <Show when={flattenEntries().length > 0} fallback={<p class="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">Add menu items before configuring their actions.</p>}>
+                  <div class="space-y-3">
+                    <For each={flattenEntries()}>{({ entry, depth }) => <article class="space-y-3 rounded-lg border border-border p-4" style={{ "margin-left": `${Math.min(depth, 5) * 12}px` }}>
+                      <div><h2 class="font-medium">{entry.label}</h2><p class="text-xs capitalize text-muted-foreground">{entry.type}</p></div>
+                      <div class="grid gap-3 sm:grid-cols-2">
+                        <For each={actionRows}>{(row) => <Show when={entry.buttons?.[row.key] !== false && (row.key !== "add" || entry.type === "section" || entry.type === "group")}>
+                          <label class={fieldClass}>{row.label} button handler
+                            <select class={selectClass} aria-label={`${row.label} button handler for ${entry.label}`} value={bindingValue(entry, row.key)} onChange={(event) => updateBinding(entry.id, row.key, event.currentTarget.value)}>
+                              <Show when={row.key === "edit"}><option value="component:menu-item-editor">Menu item editor modal component</option></Show>
+                              <For each={clientActions}>{(option) => <option value={`client:${option.clientId}:${option.actionId}`}>Workspace menu client · {option.label}</option>}</For>
+                            </select>
+                          </label>
+                        </Show>}</For>
+                      </div>
+                    </article>}</For>
+                  </div>
+                </Show>
+              </section>
             </Show>
 
             <Show when={activeTab() === "settings"}>
@@ -444,6 +518,35 @@ export default function NavigationStudio(props: Props) {
 
             </Show>
 
+            <Show when={activeTab() === "applications"}>
+              <section class="space-y-3" aria-label="Connected applications">
+                <Show when={(props.config().installations ?? []).length > 0} fallback={<p class="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">No applications are installed in this workspace.</p>}>
+                  <div class="grid gap-3 sm:grid-cols-2">
+                    <For each={props.config().installations}>{(installation) => {
+                      const application = () => props.applications?.().find((candidate) => candidate.id === installation.appId);
+                      return <article class="rounded-lg border border-border p-4">
+                        <div class="flex items-start justify-between gap-3"><div class="min-w-0"><h2 class="truncate font-medium">{application()?.name ?? installation.appId}</h2><p class="mt-1 truncate text-xs text-muted-foreground">{application()?.description ?? "Installed workspace application"}</p></div><Badge variant="secondary">Connected</Badge></div>
+                        <dl class="mt-4 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs"><dt class="text-muted-foreground">Release</dt><dd class="truncate text-right">{installation.releaseId}</dd><dt class="text-muted-foreground">Base path</dt><dd class="truncate text-right">{installation.basePath}</dd></dl>
+                      </article>;
+                    }}</For>
+                  </div>
+                </Show>
+              </section>
+            </Show>
+
+            <Show when={activeTab() === "services"}>
+              <section class="space-y-3" aria-label="Connected services">
+                <Show when={(props.config().services ?? []).length > 0} fallback={<p class="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">No services are connected in this workspace configuration.</p>}>
+                  <div class="grid gap-3 sm:grid-cols-2">
+                    <For each={props.config().services ?? []}>{(service) => <article class="rounded-lg border border-border p-4">
+                      <div class="flex items-start justify-between gap-3"><div class="min-w-0"><h2 class="truncate font-medium">{service.name}</h2><p class="mt-1 text-xs text-muted-foreground">{service.description ?? service.type}</p></div><Badge variant="secondary">Connected</Badge></div>
+                      <dl class="mt-4 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs"><dt class="text-muted-foreground">Type</dt><dd class="text-right">{service.type}</dd><dt class="text-muted-foreground">Endpoint</dt><dd class="truncate text-right"><a class="underline underline-offset-2" href={service.url} target="_blank" rel="noopener noreferrer">{service.url}</a></dd></dl>
+                    </article>}</For>
+                  </div>
+                </Show>
+              </section>
+            </Show>
+
             <Show when={activeTab() === "styles"}>
               <section class="space-y-4" aria-label="Menu styles settings">
                 <div class="space-y-1"><h2 class="font-semibold">Workspace theme</h2><p class="text-sm text-muted-foreground">Choose the theme reference applied to the shell.</p></div>
@@ -461,6 +564,11 @@ export default function NavigationStudio(props: Props) {
           </div>
         </Card>
 
+      </div>
+
+      <div class="flex justify-end gap-2 border-t border-border pt-4" aria-label="Workspace settings actions">
+        <Button variant="ghost" type="button" onClick={reset}>Reset</Button>
+        <Button type="button" onClick={save}>Save changes</Button>
       </div>
 
       <Show when={menuDialog()} keyed>

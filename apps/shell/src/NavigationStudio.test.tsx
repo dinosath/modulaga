@@ -17,8 +17,11 @@ describe("navigation studio", () => {
   it("renders the admin menu settings tabs and shell settings without a live preview", async () => {
     dispose = render(() => <NavigationStudio config={() => defaultNavigation} setConfig={() => undefined} saveConfig={async () => undefined} />, document.body);
 
-    expect(document.querySelector("h1")?.textContent).toBe("Admin Menu Settings");
-    expect(document.querySelectorAll('[role="tab"]')).toHaveLength(3);
+    expect(document.querySelector("h1")).toBeNull();
+    expect(document.body.textContent).not.toContain("Workspace / Administration");
+    expect(document.body.textContent).not.toContain("Admin Menu Settings");
+    expect(document.querySelector('[aria-label="Workspace settings actions"]')?.className).toContain("justify-end");
+    expect(document.querySelectorAll('[role="tab"]')).toHaveLength(6);
     expect(document.querySelectorAll(".menu-editor-item")).toHaveLength(2);
     expect(document.querySelector('[aria-label="Live menu preview"]')).toBeNull();
     expect(document.querySelector('[aria-label="Create application page"]')).toBeNull();
@@ -58,10 +61,9 @@ describe("navigation studio", () => {
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("Edit group"));
     expect((document.querySelector('[role="dialog"] [aria-label="Menu item label"]') as HTMLInputElement).value).toBe("Reports");
     expect(document.querySelector('[role="dialog"] [role="treeitem"][aria-selected="true"]')?.textContent).toContain("Operations");
-    const icon = document.querySelector('[role="dialog"] [aria-label="Menu item icon"]') as HTMLSelectElement;
-    icon.value = "briefcase";
-    icon.dispatchEvent(new Event("change", { bubbles: true }));
-    expect(icon.value).toBe("briefcase");
+    const icon = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] [aria-label="Choose menu item icon"] button')].find((button) => button.textContent?.trim() === "briefcase")!;
+    icon.click();
+    await vi.waitFor(() => expect(icon.getAttribute("aria-pressed")).toBe("true"));
     const submitEdit = document.querySelector('[role="dialog"] button[type="submit"]') as HTMLButtonElement;
     expect(submitEdit.disabled).toBe(false);
     submitEdit.click();
@@ -123,6 +125,51 @@ describe("navigation studio", () => {
     (document.querySelector('[role="dialog"] button[type="submit"]') as HTMLButtonElement).click();
     await vi.waitFor(() => expect(config().menus[0]?.entries.map((entry) => entry.label)).toEqual(["Commerce", "Settings"]));
     expect(config().menus[0]?.entries.map((entry) => entry.id)).toEqual(["operations", "settings"]);
+  });
+
+  it("opens the requested menu item editor from a sidebar edit command", async () => {
+    const [itemId, setItemId] = createSignal<string>();
+    dispose = render(() => <NavigationStudio config={() => defaultNavigation} setConfig={() => undefined} saveConfig={async () => undefined} openEditItemId={itemId} />, document.body);
+
+    setItemId("orders-link");
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("Edit entry"));
+    expect((document.querySelector('[role="dialog"] [aria-label="Menu item label"]') as HTMLInputElement).value).toBe("Orders");
+    expect(document.querySelector('[role="dialog"] [aria-label="Edit button handler"]')).toBeNull();
+    expect(document.querySelectorAll(".menu-editor-item")).toHaveLength(2);
+  });
+
+  it("configures menu button handlers in the Actions tab and persists them with menu items", async () => {
+    const [config, setConfig] = createSignal(defaultNavigation);
+    dispose = render(() => <NavigationStudio config={config} setConfig={setConfig} saveConfig={async () => undefined} />, document.body);
+
+    (document.querySelector("#admin-actions-tab") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Edit button handler for Orders"]')).not.toBeNull());
+    const handler = document.querySelector('[aria-label="Edit button handler for Orders"]') as HTMLSelectElement;
+    expect(handler.value).toBe("component:menu-item-editor");
+    handler.value = "client:workspace-menu:edit";
+    handler.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(handler.value).toBe("client:workspace-menu:edit");
+
+    await vi.waitFor(() => {
+      const operations = config().menus[0]!.entries[0]!;
+      if (operations.type !== "section") throw new Error("Operations section missing");
+      const orders = operations.children.find((entry) => entry.id === "orders-link");
+      expect(orders?.buttonActions?.edit).toEqual({ type: "client", clientId: "workspace-menu", actionId: "edit" });
+    });
+  });
+
+  it("runs add and move commands from sidebar options", async () => {
+    const [config, setConfig] = createSignal(defaultNavigation);
+    const [command, setCommand] = createSignal<{ action: "add" | "moveUp" | "moveDown" | "moveTo"; itemId: string }>();
+    dispose = render(() => <NavigationStudio config={config} setConfig={setConfig} saveConfig={async () => undefined} sidebarCommand={command} />, document.body);
+
+    setCommand({ action: "add", itemId: "operations" });
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("Add menu item"));
+    [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((button) => button.textContent?.trim() === "Cancel")?.click();
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+
+    setCommand({ action: "moveUp", itemId: "settings" });
+    await vi.waitFor(() => expect(config().menus[0]?.entries.map((entry) => entry.id)).toEqual(["settings", "operations"]));
   });
 
   it("moves the configured Settings section up and down and saves the new order", async () => {

@@ -24,9 +24,7 @@ struct CatalogApi {
 #[allow(refining_impl_trait)]
 impl CatalogService for CatalogApi {
     async fn get(
-        &self,
-        _ctx: RequestContext,
-        _request: ServiceRequest<'_, GetCatalogRequest>,
+        &self, _ctx: RequestContext, _request: ServiceRequest<'_, GetCatalogRequest>,
     ) -> ServiceResult<CatalogResponse> {
         Response::ok(CatalogResponse {
             catalog_json: self.serialized.clone(),
@@ -54,15 +52,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rpc = Arc::new(CatalogApi { serialized }).register(ConnectRouter::new());
     let origins = std::env::var("ALLOWED_ORIGINS")
         .unwrap_or_else(|_| "http://localhost:4310,http://127.0.0.1:4310".into());
-    let origins = origins
-        .split(',')
-        .filter_map(|value| value.trim().parse().ok())
-        .collect::<Vec<_>>();
+    let origins =
+        origins.split(',').filter_map(|value| value.trim().parse().ok()).collect::<Vec<_>>();
     let app = Router::new()
-        .route(
-            "/health",
-            get(|| async { Json(serde_json::json!({"status":"ok"})) }),
-        )
+        .route("/health", get(|| async { Json(serde_json::json!({"status":"ok"})) }))
         .merge(rpc.into_axum_router())
         .layer(
             CorsLayer::new()
@@ -72,9 +65,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .expose_headers(Any),
         )
         .layer(TraceLayer::new_for_http());
-    let address: SocketAddr = std::env::var("CATALOG_BIND_ADDRESS")
-        .unwrap_or_else(|_| "0.0.0.0:4304".into())
-        .parse()?;
+    let address: SocketAddr =
+        std::env::var("CATALOG_BIND_ADDRESS").unwrap_or_else(|_| "0.0.0.0:4304".into()).parse()?;
     let listener = tokio::net::TcpListener::bind(address).await?;
     tracing::info!(%address, "microfrontend catalog ConnectRPC service ready");
     axum::serve(listener, app)

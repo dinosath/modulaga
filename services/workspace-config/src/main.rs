@@ -32,14 +32,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let config: Value = serde_json::from_str(&seed)?;
     workspace_config::validate_workspace_config(&config).map_err(std::io::Error::other)?;
-    let workspace_id = config["workspace"]["id"]
-        .as_str()
-        .unwrap_or("default")
-        .to_owned();
+    let workspace_id = config["workspace"]["id"].as_str().unwrap_or("default").to_owned();
     let store_mode = std::env::var("WORKSPACE_STORE").unwrap_or_else(|_| "sqlite".into());
     let store: Arc<dyn WorkspaceStore> = match store_mode.as_str() {
         "memory" => {
-            tracing::warn!("workspace configuration is stored in memory and will be lost on restart");
+            tracing::warn!(
+                "workspace configuration is stored in memory and will be lost on restart"
+            );
             Arc::new(MemoryWorkspaceStore::with_record(WorkspaceConfigRecord {
                 workspace_id: workspace_id.clone(),
                 config,
@@ -61,9 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let auth = match std::env::var("AUTH_MODE").as_deref() {
         Ok("oidc") => Authenticator::oidc_with_endpoints(
             std::env::var("OIDC_ISSUER").expect("OIDC_ISSUER is required when AUTH_MODE=oidc"),
-            std::env::var("OIDC_AUDIENCE")
-                .ok()
-                .filter(|value| !value.trim().is_empty()),
+            std::env::var("OIDC_AUDIENCE").ok().filter(|value| !value.trim().is_empty()),
             std::env::var("OIDC_ADMIN_ROLE").unwrap_or_else(|_| "modulaga-admin".into()),
             std::env::var("OIDC_DISCOVERY_URL").ok(),
             std::env::var("OIDC_JWKS_URI").ok(),
@@ -78,8 +75,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(other) => return Err(format!("unsupported AUTH_MODE: {other}").into()),
     };
 
-    let connect_router = Arc::new(ConfigService::new(AppState::new(store, auth)))
-        .register(ConnectRouter::new());
+    let connect_router =
+        Arc::new(ConfigService::new(AppState::new(store, auth))).register(ConnectRouter::new());
     let allowed_origins = std::env::var("ALLOWED_ORIGINS")
         .unwrap_or_else(|_| "http://127.0.0.1:4300,http://localhost:4300".into());
     let origins = allowed_origins
@@ -92,10 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .allow_headers(Any)
         .expose_headers(Any);
     let app = Router::new()
-        .route(
-            "/health",
-            get(|| async { Json(serde_json::json!({"status":"ok"})) }),
-        )
+        .route("/health", get(|| async { Json(serde_json::json!({"status":"ok"})) }))
         .merge(connect_router.into_axum_router())
         .layer(cors)
         .layer(TraceLayer::new_for_http())
@@ -104,9 +98,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             axum::http::HeaderValue::from_static("nosniff"),
         ));
 
-    let address: SocketAddr = std::env::var("BIND_ADDRESS")
-        .unwrap_or_else(|_| "0.0.0.0:4303".into())
-        .parse()?;
+    let address: SocketAddr =
+        std::env::var("BIND_ADDRESS").unwrap_or_else(|_| "0.0.0.0:4303".into()).parse()?;
     let listener = tokio::net::TcpListener::bind(address).await?;
     tracing::info!(%address, "workspace configuration ConnectRPC service ready");
     axum::serve(listener, app)

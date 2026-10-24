@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "apps": [
+    {
+      "id": "orders",
+      "name": "Orders",
+      "publisher": {
+        "id": "modulaga-demo",
+        "name": "Modulaga Demo"
+      },
+      "description": "Local example microfrontend.",
+      "tags": [
+        "operations",
+        "demo"
+      ],
+      "releases": [
+        {
+          "id": "orders@1.2.0",
+          "version": "1.2.0",
+          "publishedAt": "2026-09-01T12:00:00Z",
+          "manifestUrl": "http://localhost:4174/mf-manifest.json",
+          "remoteName": "demo_react",
+          "exposedModule": "./mount",
+          "requiredCapabilities": [
+            "workspace:read"
+          ],
+          "compatibility": {
+            "lifecycleContractVersion": "1.0.0",
+            "minimumShellVersion": "0.1.0",
+            "federationFormat": "module-federation",
+            "remoteType": "module",
+            "designSystemVersion": "1.0.0"
+          }
+        }
+      ]
+    },
+    {
+      "id": "content-types",
+      "name": "Content types",
+      "publisher": {
+        "id": "modulaga",
+        "name": "Modulaga"
+      },
+      "description": "Schema editor for workspace content models.",
+      "tags": [
+        "content",
+        "schemas"
+      ],
+      "releases": [
+        {
+          "id": "content-types@static",
+          "version": "0.1.0",
+          "publishedAt": "2026-10-22T00:00:00Z",
+          "manifestUrl": "http://localhost:4175/mf-manifest.json",
+          "remoteName": "content_types",
+          "exposedModule": "./mount",
+          "requiredCapabilities": [
+            "workspace:read"
+          ],
+          "compatibility": {
+            "lifecycleContractVersion": "1.0.0",
+            "minimumShellVersion": "0.1.0",
+            "federationFormat": "module-federation",
+            "remoteType": "module",
+            "designSystemVersion": "1.0.0"
+          }
+        }
+      ]
+    },
+    {
+      "id": "application-generator",
+      "name": "Application generator",
+      "publisher": {
+        "id": "modulaga",
+        "name": "Modulaga"
+      },
+      "description": "Generate and build applications from workspace content types.",
+      "tags": [
+        "applications",
+        "baker",
+        "codegen"
+      ],
+      "releases": [
+        {
+          "id": "application-generator@static",
+          "version": "0.1.0",
+          "publishedAt": "2026-10-22T00:00:00Z",
+          "manifestUrl": "http://localhost:4177/mf-manifest.json",
+          "remoteName": "application_generator",
+          "exposedModule": "./mount",
+          "requiredCapabilities": [
+            "workspace:read"
+          ],
+          "compatibility": {
+            "lifecycleContractVersion": "1.0.0",
+            "minimumShellVersion": "0.1.0",
+            "federationFormat": "module-federation",
+            "remoteType": "module",
+            "designSystemVersion": "1.0.0"
+          }
+        }
+      ]
+    },
+    {
+      "id": "admin-panel",
+      "name": "Workspace Settings",
+      "publisher": {
+        "id": "modulaga",
+        "name": "Modulaga"
+      },
+      "description": "Workspace navigation, settings, styles, applications and services.",
+      "tags": [
+        "workspace",
+        "administration"
+      ],
+      "releases": [
+        {
+          "id": "admin-panel@static",
+          "version": "0.1.0",
+          "publishedAt": "2026-10-22T00:00:00Z",
+          "manifestUrl": "http://localhost:4176/mf-manifest.json",
+          "remoteName": "admin_panel",
+          "exposedModule": "./mount",
+          "requiredCapabilities": [
+            "workspace:read"
+          ],
+          "compatibility": {
+            "lifecycleContractVersion": "1.0.0",
+            "minimumShellVersion": "0.1.0",
+            "federationFormat": "module-federation",
+            "remoteType": "module",
+            "designSystemVersion": "1.0.0"
+          }
+        }
+      ]
+    }
+  ]
+}

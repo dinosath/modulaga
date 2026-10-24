@@ -1,0 +1,15 @@
+min_version = "2024.1.0"
+
+[tools]
+rust = "latest"
+
+[tasks.dev]
+description = "Run the application generator backend service"
+run = '''
+mkdir -p ../../.data
+AUTH_MODE=disabled APPLICATION_GENERATOR_DATABASE_URL="sqlite://../../.data/application-generator.sqlite?mode=rwc" GENERATED_APPS_DIR="../../.data/generated-apps" CONTENT_TYPES_API_URL="http://127.0.0.1:4305" cargo run --bin application-generator
+'''
+
+[tasks.build]
+description = "Build the application generator backend service"
+run = "cargo build --bin application-generator"

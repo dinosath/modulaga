@@ -16,3 +16,20 @@ body,
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+.sidebar-entry-row {
+  container: sidebar-entry / inline-size;
+}
+
+.sidebar-entry-actions {
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.sidebar-entry-row:hover .sidebar-entry-actions,
+.sidebar-entry-row:focus-within .sidebar-entry-actions,
+.sidebar-entry-row[data-active="true"] .sidebar-entry-actions {
+  visibility: visible;
+  opacity: 1;
+}

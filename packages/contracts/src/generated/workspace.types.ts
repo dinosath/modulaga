@@ -1,6 +1,16 @@
 /* Generated from src/schemas. Do not edit directly. */
 
 export type Identifier = string;
+export type MenuButtonBinding =
+  | {
+      type: "client";
+      clientId: Identifier;
+      actionId: Identifier;
+    }
+  | {
+      type: "component";
+      componentId: Identifier;
+    };
 export type MenuEntry = MenuGroup | InternalMenuEntry | ExternalMenuEntry | ActionMenuEntry;
 
 export interface WorkspaceConfiguration {
@@ -15,6 +25,7 @@ export interface WorkspaceConfiguration {
   shell?: ShellSettings;
   dashboards?: DashboardDefinition[];
   theme?: ThemeReference;
+  services?: WorkspaceService[];
 }
 export interface WorkspaceIdentity {
   id: Identifier;
@@ -55,7 +66,28 @@ export interface MenuSection {
   label: string;
   icon?: string;
   visible?: boolean;
+  buttons?: MenuItemButtons;
+  buttonActions?: MenuItemButtonActions;
   children: MenuEntry[];
+}
+export interface MenuItemButtons {
+  edit?: boolean;
+  visibility?: boolean;
+  delete?: boolean;
+  options?: boolean;
+  add?: boolean;
+  moveUp?: boolean;
+  moveDown?: boolean;
+  moveTo?: boolean;
+}
+export interface MenuItemButtonActions {
+  edit?: MenuButtonBinding;
+  visibility?: MenuButtonBinding;
+  delete?: MenuButtonBinding;
+  add?: MenuButtonBinding;
+  moveUp?: MenuButtonBinding;
+  moveDown?: MenuButtonBinding;
+  moveTo?: MenuButtonBinding;
 }
 export interface MenuGroup {
   id: Identifier;
@@ -63,6 +95,8 @@ export interface MenuGroup {
   label: string;
   icon?: string;
   visible?: boolean;
+  buttons?: MenuItemButtons;
+  buttonActions?: MenuItemButtonActions;
   chevron?: boolean;
   defaultExpanded?: boolean;
   children: MenuEntry[];
@@ -74,6 +108,8 @@ export interface InternalMenuEntry {
   icon?: string;
   routeId: Identifier;
   visible?: boolean;
+  buttons?: MenuItemButtons;
+  buttonActions?: MenuItemButtonActions;
 }
 export interface ExternalMenuEntry {
   id: Identifier;
@@ -82,6 +118,8 @@ export interface ExternalMenuEntry {
   icon?: string;
   href: string;
   visible?: boolean;
+  buttons?: MenuItemButtons;
+  buttonActions?: MenuItemButtonActions;
 }
 export interface ActionMenuEntry {
   id: Identifier;
@@ -89,6 +127,8 @@ export interface ActionMenuEntry {
   label: string;
   icon?: string;
   visible?: boolean;
+  buttons?: MenuItemButtons;
+  buttonActions?: MenuItemButtonActions;
   action: "admin-panel";
   path: string;
 }
@@ -138,4 +178,12 @@ export interface DashboardDefinition {
 export interface ThemeReference {
   id: Identifier;
   version: string;
+}
+export interface WorkspaceService {
+  id: Identifier;
+  name: string;
+  type: string;
+  url: string;
+  description?: string;
+  icon?: string;
 }

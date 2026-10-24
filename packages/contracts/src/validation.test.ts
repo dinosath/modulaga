@@ -58,4 +58,16 @@ describe("configuration schemas", () => {
     workspace.menus[0].entries.at(-1).children[0].children[0].action = "unknown-action";
     expect(validateWorkspace(workspace)).toBe(false);
   });
+
+  it("validates client action and component menu button bindings", () => {
+    const workspace = fixture<Record<string, any>>("workspaces/default.json");
+    const orders = workspace.menus[0].entries[0].children[0];
+    orders.buttonActions = {
+      edit: { type: "component", componentId: "menu-item-editor" },
+      visibility: { type: "client", clientId: "workspace-menu", actionId: "visibility" },
+    };
+    expect(validateWorkspace(workspace)).toBe(true);
+    orders.buttonActions.edit = { type: "component", componentId: "bad/id" };
+    expect(validateWorkspace(workspace)).toBe(false);
+  });
 });

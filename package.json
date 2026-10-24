@@ -7,13 +7,13 @@
   },
   "scripts": {
     "dev": "bash scripts/dev-local.sh",
-    "typecheck": "pnpm --filter @modulaga/shell typecheck && pnpm --filter @modulaga/contracts typecheck",
-    "test": "pnpm --filter @modulaga/shell test && pnpm --filter @modulaga/contracts test && cargo test --manifest-path services/workspace-config/Cargo.toml",
-    "test:coverage": "pnpm --filter @modulaga/shell test:coverage && cargo llvm-cov --manifest-path services/workspace-config/Cargo.toml --all-targets --ignore-filename-regex 'target|src/main.rs|src/bin/.*|postgres.rs' --fail-under-lines 90",
-    "build": "pnpm --filter @modulaga/shell build",
+    "typecheck": "npm_config_manage_package_manager_versions=false pnpm --filter @modulaga/shell typecheck && npm_config_manage_package_manager_versions=false pnpm --filter @modulaga/content-types typecheck && npm_config_manage_package_manager_versions=false pnpm --filter @modulaga/application-generator typecheck && npm_config_manage_package_manager_versions=false pnpm --filter @modulaga/contracts typecheck",
+    "test": "npm_config_manage_package_manager_versions=false pnpm --filter @modulaga/shell test && npm_config_manage_package_manager_versions=false pnpm --filter @modulaga/contracts test && cargo test --manifest-path services/workspace-config/Cargo.toml && cargo test --manifest-path services/content-types/Cargo.toml && cargo test --manifest-path services/application-generator/Cargo.toml",
+    "test:coverage": "npm_config_manage_package_manager_versions=false pnpm --filter @modulaga/shell test:coverage && cargo llvm-cov --manifest-path services/workspace-config/Cargo.toml --all-targets --ignore-filename-regex 'target|src/main.rs|src/bin/.*|postgres.rs' --fail-under-lines 90 && cargo llvm-cov --manifest-path services/content-types/Cargo.toml --all-targets --ignore-filename-regex 'target|src/main.rs' --fail-under-lines 90 && cargo llvm-cov --manifest-path services/application-generator/Cargo.toml --all-targets --ignore-filename-regex 'target|src/main.rs' --fail-under-lines 90",
+    "build": "npm_config_manage_package_manager_versions=false pnpm --filter @modulaga/shell build && npm_config_manage_package_manager_versions=false pnpm --filter @modulaga/demo-react build && npm_config_manage_package_manager_versions=false pnpm --filter @modulaga/content-types build && npm_config_manage_package_manager_versions=false pnpm --filter @modulaga/admin-panel build && npm_config_manage_package_manager_versions=false pnpm --filter @modulaga/application-generator build && cargo build --manifest-path services/workspace-config/Cargo.toml --bins && cargo build --manifest-path services/content-types/Cargo.toml --bin content-types && cargo build --manifest-path services/application-generator/Cargo.toml --bin application-generator",
     "workspace-config:dev": "cargo run --manifest-path services/workspace-config/Cargo.toml --bin workspace-config",
     "workspace-config:test": "cargo test --manifest-path services/workspace-config/Cargo.toml",
-    "test:e2e": "pnpm --filter @modulaga/shell build && pnpm --filter @modulaga/demo-react build && playwright test --config playwright.spike.config.ts",
+    "test:e2e": "npm_config_manage_package_manager_versions=false pnpm --filter @modulaga/shell build && npm_config_manage_package_manager_versions=false pnpm --filter @modulaga/demo-react build && playwright test --config playwright.spike.config.ts",
     "test:spike": "pnpm test:e2e"
   },
   "devDependencies": {

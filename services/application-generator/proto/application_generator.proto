@@ -1,0 +1,110 @@
+syntax = "proto3";
+
+package modulaga.applicationgenerator.v1;
+
+message ListContentTypesRequest {}
+message ContentTypeOption {
+  string uid = 1;
+  string display_name = 2;
+  string kind = 3;
+  string schema_json = 4;
+  uint64 revision = 5;
+}
+message ListContentTypesResponse { repeated ContentTypeOption content_types = 1; }
+message ListApplicationsRequest {}
+message GeneratedApplication {
+  string id = 1;
+  string name = 2;
+  string slug = 3;
+  string output_path = 4;
+  string status = 5;
+  string build_output = 6;
+  repeated string content_type_uids = 7;
+  string created_at = 8;
+}
+message ListApplicationsResponse { repeated GeneratedApplication applications = 1; }
+message GenerateApplicationRequest {
+  string name = 1;
+  string slug = 2;
+  repeated string content_type_uids = 3;
+}
+
+message ApplicationTemplate {
+  string id = 1;
+  string name = 2;
+  string url = 3;
+  string description = 4;
+  string icon = 5;
+  string questions_json = 6;
+  string created_at = 7;
+  string updated_at = 8;
+}
+message ListTemplatesRequest {}
+message ListTemplatesResponse { repeated ApplicationTemplate templates = 1; }
+message GetTemplateRequest { string id = 1; }
+message CheckTemplateRequest { string url = 1; }
+message CheckTemplateResponse {
+  string url = 1;
+  string questions_json = 2;
+  string baker_yaml = 3;
+}
+message CreateTemplateRequest {
+  string name = 1;
+  string url = 2;
+  string description = 3;
+  string icon = 4;
+}
+message UpdateTemplateRequest {
+  string id = 1;
+  string name = 2;
+  string url = 3;
+  string description = 4;
+  string icon = 5;
+}
+message DeleteTemplateRequest { string id = 1; }
+message DeleteTemplateResponse { bool deleted = 1; }
+
+message GenerationRun {
+  string id = 1;
+  string template_name = 2;
+  string template_url = 3;
+  string status = 4;
+  string destination_type = 5;
+  string destination = 6;
+  string output_path = 7;
+  string configuration_json = 8;
+  string logs = 9;
+  string created_at = 10;
+  string updated_at = 11;
+  string template_id = 12;
+}
+message ListGenerationRunsRequest {}
+message ListGenerationRunsResponse { repeated GenerationRun runs = 1; }
+message GetGenerationRunRequest { string id = 1; }
+message DeleteGenerationRunRequest { string id = 1; }
+message DeleteGenerationRunResponse { bool deleted = 1; }
+message StartGenerationRequest {
+  string template_id = 1;
+  string template_name = 2;
+  string template_url = 3;
+  string answers_json = 4;
+  string destination_type = 5;
+  string destination = 6;
+  string branch = 7;
+}
+
+service ApplicationGeneratorService {
+  rpc ListContentTypes(ListContentTypesRequest) returns (ListContentTypesResponse);
+  rpc ListApplications(ListApplicationsRequest) returns (ListApplicationsResponse);
+  rpc Generate(GenerateApplicationRequest) returns (GeneratedApplication);
+  rpc ListTemplates(ListTemplatesRequest) returns (ListTemplatesResponse);
+  rpc GetTemplate(GetTemplateRequest) returns (ApplicationTemplate);
+  rpc CheckTemplate(CheckTemplateRequest) returns (CheckTemplateResponse);
+  rpc CreateTemplate(CreateTemplateRequest) returns (ApplicationTemplate);
+  rpc UpdateTemplate(UpdateTemplateRequest) returns (ApplicationTemplate);
+  rpc DeleteTemplate(DeleteTemplateRequest) returns (DeleteTemplateResponse);
+  rpc ListGenerationRuns(ListGenerationRunsRequest) returns (ListGenerationRunsResponse);
+  rpc GetGenerationRun(GetGenerationRunRequest) returns (GenerationRun);
+  rpc StartGeneration(StartGenerationRequest) returns (GenerationRun);
+  rpc DeleteGenerationRun(DeleteGenerationRunRequest) returns (DeleteGenerationRunResponse);
+}

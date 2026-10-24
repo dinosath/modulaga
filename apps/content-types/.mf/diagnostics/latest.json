@@ -1,0 +1,10 @@
+{
+  "latestErrorEvent": {
+    "code": "TYPE-001",
+    "message": "Failed to generate type declaration. Execute the below cmd to reproduce and fix the error. #TYPE-001\nargs: {\"cmd\":\"/opt/homebrew/Cellar/node/26.0.0/bin/node /Users/A200331510/Projects/modulaga/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/bin/tsc --project /Users/A200331510/Projects/modulaga/apps/content-types/node_modules/.federation/tsconfig.d9d7adcea4ff2df9a067fdd74293fe38.json\"}\nView the docs to see how to solve: https://module-federation.io/guide/troubleshooting/type#type-001",
+    "args": {
+      "cmd": "/opt/homebrew/Cellar/node/26.0.0/bin/node /Users/A200331510/Projects/modulaga/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/bin/tsc --project /Users/A200331510/Projects/modulaga/apps/content-types/node_modules/.federation/tsconfig.d9d7adcea4ff2df9a067fdd74293fe38.json"
+    },
+    "timestamp": 1792617226541
+  }
+}

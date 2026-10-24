@@ -3,7 +3,7 @@ import solid from "@solidjs/vite-plugin";
 import UnoCSS from "unocss/vite";
 
 export default defineConfig({
-  plugins: [solid(), UnoCSS()],
+  plugins: [solid(), UnoCSS({ inspector: !process.env.VITEST })],
   server: {
     host: "127.0.0.1",
     port: 4300,

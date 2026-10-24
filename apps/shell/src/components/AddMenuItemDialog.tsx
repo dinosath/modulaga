@@ -16,7 +16,7 @@ import {
   UsersRound,
 } from "@lucide/solid";
 import { Dynamic } from "@solidjs/web";
-import type { NavigationContainer, NavigationEntry, NavigationGroup, WorkspaceNavigation } from "../config/navigation";
+import type { MenuItemButtons, NavigationContainer, NavigationEntry, NavigationGroup, WorkspaceNavigation } from "../config/navigation";
 import { isNavigationContainer } from "../config/navigation";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -74,6 +74,16 @@ export function AddMenuItemDialog(props: Props) {
   const [routeId, setRouteId] = createSignal(existing?.type === "route" ? existing.routeId : props.routes[0]?.id ?? "");
   const [href, setHref] = createSignal(existing?.type === "external" ? existing.href : "https://");
   const [actionPath, setActionPath] = createSignal(existing?.type === "action" ? existing.path : "/admin/menu");
+  const [buttons, setButtons] = createSignal<MenuItemButtons>({
+    edit: existing?.buttons?.edit ?? true,
+    visibility: existing?.buttons?.visibility ?? true,
+    delete: existing?.buttons?.delete ?? true,
+    options: existing?.buttons?.options ?? true,
+    add: existing?.buttons?.add ?? true,
+    moveUp: existing?.buttons?.moveUp ?? true,
+    moveDown: existing?.buttons?.moveDown ?? true,
+    moveTo: existing?.buttons?.moveTo ?? true,
+  });
   const [parentId, setParentId] = createSignal(findParentId(props.entries, item()?.id ?? "") ?? props.parentId ?? "");
   const selectClass = "h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
   const excluded = () => item() ? collectDescendants(item()!) : new Set<string>();
@@ -105,37 +115,44 @@ export function AddMenuItemDialog(props: Props) {
     const selectedType = data.get("menu-item-type") === "group" ? "group" : type();
     const selectedRouteId = String(data.get("menu-item-route") ?? routeId());
     const selectedParentId = String(data.get("menu-item-parent") ?? parentId()) || undefined;
+    const selectedButtons = buttons();
     if (!name) return;
     const existing = item();
     if (existing?.type === "section") {
-      props.onSave({ ...existing, label: name }, undefined);
+      props.onSave({ ...existing, label: name, buttons: selectedButtons }, undefined);
       return;
     }
     if (existing?.type === "group" || selectedType === "group") {
       const group: NavigationGroup = existing?.type === "group"
-        ? { ...existing, label: name, icon: selectedIcon }
-        : { id: `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "new-item"}-${Date.now()}`, type: "group", label: name, icon: selectedIcon, visible: true, chevron: true, defaultExpanded: true, children: [] };
+        ? { ...existing, label: name, icon: selectedIcon, buttons: selectedButtons }
+        : { id: `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "new-item"}-${Date.now()}`, type: "group", label: name, icon: selectedIcon, visible: true, buttons: selectedButtons, chevron: true, defaultExpanded: true, children: [] };
       props.onSave(group, selectedParentId);
       return;
     }
     if (existing?.type === "external") {
-      props.onSave({ ...existing, label: name, icon: selectedIcon, href: String(data.get("menu-item-href") ?? href()).trim() }, selectedParentId);
+      props.onSave({ ...existing, label: name, icon: selectedIcon, href: String(data.get("menu-item-href") ?? href()).trim(), buttons: selectedButtons }, selectedParentId);
       return;
     }
     if (existing?.type === "action") {
-      props.onSave({ ...existing, label: name, icon: selectedIcon, path: String(data.get("menu-item-action-path") ?? actionPath()).trim() }, selectedParentId);
+      props.onSave({ ...existing, label: name, icon: selectedIcon, path: String(data.get("menu-item-action-path") ?? actionPath()).trim(), buttons: selectedButtons }, selectedParentId);
       return;
     }
     const route = props.routes.find((candidate) => candidate.id === selectedRouteId);
     if (!route) return;
-    if (existing?.type === "route") props.onSave({ ...existing, label: name, icon: selectedIcon, routeId: route.id }, selectedParentId);
-    else props.onSave({ id: `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "new-item"}-${Date.now()}`, type: "route", routeId: route.id, label: name, icon: selectedIcon, visible: true }, selectedParentId);
+    if (existing?.type === "route") props.onSave({ ...existing, label: name, icon: selectedIcon, routeId: route.id, buttons: selectedButtons }, selectedParentId);
+    else props.onSave({ id: `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "new-item"}-${Date.now()}`, type: "route", routeId: route.id, label: name, icon: selectedIcon, visible: true, buttons: selectedButtons }, selectedParentId);
   }
 
   const fixedType = () => editing();
+  const requiresRoute = () => type() === "entry" && item()?.type !== "section" && item()?.type !== "external" && item()?.type !== "action";
   const title = () => editing() ? `Edit ${item()?.type === "section" ? "section" : item()?.type === "group" ? "group" : "entry"}` : "Add menu item";
   const allowedParent = () => item()?.type === "section" || !parentId() || parents().some((entry) => entry.id === parentId());
-
+  function updateButton(name: keyof MenuItemButtons, enabled: boolean) {
+    const current = buttons();
+    if (name === "edit" && !enabled && current.options === false) return;
+    if (name === "options" && !enabled && current.edit === false) return;
+    setButtons({ ...current, [name]: enabled });
+  }
   return <div class="fixed inset-0 z-[120] grid place-items-center overflow-y-auto bg-black/50 p-4" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) props.onCancel(); }} onKeyDown={(event) => { if (event.key === "Escape") props.onCancel(); }}>
     <section class="w-full max-w-lg rounded-xl border border-border bg-background p-6 text-foreground shadow-xl" role="dialog" aria-modal="true" aria-labelledby="add-menu-item-title" aria-describedby="add-menu-item-description">
       <form class="grid gap-4" onSubmit={(event) => { event.preventDefault(); saveItem(event.currentTarget); }}>
@@ -172,13 +189,27 @@ export function AddMenuItemDialog(props: Props) {
             <Show when={parentId() && !allowedParent()}><p class="text-xs text-destructive">Choose a valid section or group parent.</p></Show>
           </fieldset>
         </Show>
-        <Show when={type() === "entry" && item()?.type !== "external" && item()?.type !== "action"}>
+        <Show when={requiresRoute()}>
           <label class="grid gap-2 text-sm font-medium text-foreground">Application page<select name="menu-item-route" class={selectClass} aria-label="Application page" value={routeId()} onChange={(event) => setRouteId(event.currentTarget.value)} required><For each={props.routes}>{(route) => <option value={route.id}>{route.path}</option>}</For></select></label>
           <Show when={props.routes.length === 0}><p class="text-sm text-destructive">Install an application with a page route before adding an entry.</p></Show>
         </Show>
         <Show when={item()?.type === "external"}><label class="grid gap-2 text-sm font-medium text-foreground">HTTPS destination<Input name="menu-item-href" aria-label="External destination" type="url" value={href()} onInput={(event) => setHref(event.currentTarget.value)} required /></label></Show>
         <Show when={item()?.type === "action"}><label class="grid gap-2 text-sm font-medium text-foreground">Application path<Input name="menu-item-action-path" aria-label="Action path" value={actionPath()} onInput={(event) => setActionPath(event.currentTarget.value)} required /></label></Show>
-        <footer class="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={props.onCancel}>Cancel</Button><Button type="submit" disabled={!label().trim() || !allowedParent() || (type() === "entry" && item()?.type !== "external" && item()?.type !== "action" && !props.routes.some((route) => route.id === routeId()))}>{editing() ? "Save changes" : `Add ${type()}`}</Button></footer>
+        <fieldset class="grid gap-2">
+          <legend class="text-sm font-medium text-foreground">Menu item buttons</legend>
+          <p class="text-xs text-muted-foreground">Choose which controls appear on this item. Configure their actions in the Actions tab.</p>
+          <div class="grid gap-2 sm:grid-cols-2">
+            <label class="flex items-center gap-2 text-sm"><input type="checkbox" checked={buttons().edit !== false} disabled={buttons().options === false} onChange={(event) => updateButton("edit", event.currentTarget.checked)} />Edit button</label>
+            <label class="flex items-center gap-2 text-sm"><input type="checkbox" checked={buttons().visibility !== false} onChange={(event) => updateButton("visibility", event.currentTarget.checked)} />Visibility button</label>
+            <label class="flex items-center gap-2 text-sm"><input type="checkbox" checked={buttons().delete !== false} onChange={(event) => updateButton("delete", event.currentTarget.checked)} />Delete button</label>
+            <label class="flex items-center gap-2 text-sm"><input type="checkbox" checked={buttons().options !== false} disabled={buttons().edit === false} onChange={(event) => updateButton("options", event.currentTarget.checked)} />More options button</label>
+            <Show when={item()?.type === "section" || type() === "group"}><label class="flex items-center gap-2 text-sm"><input type="checkbox" checked={buttons().add !== false} onChange={(event) => updateButton("add", event.currentTarget.checked)} />Add menu item button</label></Show>
+            <label class="flex items-center gap-2 text-sm"><input type="checkbox" checked={buttons().moveUp !== false} onChange={(event) => updateButton("moveUp", event.currentTarget.checked)} />Move up button</label>
+            <label class="flex items-center gap-2 text-sm"><input type="checkbox" checked={buttons().moveDown !== false} onChange={(event) => updateButton("moveDown", event.currentTarget.checked)} />Move down button</label>
+            <label class="flex items-center gap-2 text-sm"><input type="checkbox" checked={buttons().moveTo !== false} onChange={(event) => updateButton("moveTo", event.currentTarget.checked)} />Move to button</label>
+          </div>
+        </fieldset>
+        <footer class="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={props.onCancel}>Cancel</Button><Button type="submit" disabled={!label().trim() || !allowedParent() || (requiresRoute() && !props.routes.some((route) => route.id === routeId()))}>{editing() ? "Save changes" : `Add ${type()}`}</Button></footer>
       </form>
     </section>
   </div>;

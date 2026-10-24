@@ -1,0 +1,19 @@
+min_version = "2024.1.0"
+
+[tools]
+node = "24"
+pnpm = "12.8.1"
+rust = "latest"
+"github:aliev/baker" = "latest"
+
+[tasks.setup]
+description = "Install JavaScript workspace dependencies"
+run = "pnpm install --frozen-lockfile"
+
+[tasks.dev]
+description = "Build and run the shell, every microfrontend, and all backend services"
+run = "pnpm dev"
+
+[tasks.build]
+description = "Build all applications and backend services"
+run = "pnpm build"
